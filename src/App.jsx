@@ -72,12 +72,12 @@ function Main() {
             </ProtectedRoute>
           } />
           <Route path="/chat" element={
-            <ProtectedRoute>
+            <ProtectedRoute denyRoles={["Administrador","Moderador"]}>
               <ChatPage />
             </ProtectedRoute>
           } />
           <Route path="/chat/:vendorId" element={
-            <ProtectedRoute>
+            <ProtectedRoute denyRoles={["Administrador","Moderador"]}>
               <ChatPage />
             </ProtectedRoute>
           } />
