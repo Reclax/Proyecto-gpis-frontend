@@ -8,71 +8,7 @@ import { checkAdminAccess } from '../utils/rolePermissions';
 
 // Datos demo de usuarios
 const usuariosDemo = [
-  {
-    id: 1,
-    cedula: '1234567890',
-    nombre: 'Juan',
-    apellido: 'Pérez',
-    email: 'juan.perez@email.com',
-    telefono: '0987654321',
-    direccion: 'Quito, Ecuador',
-    genero: 'Masculino',
-    estado: true,
-    fecha_registro: '2024-01-15T10:30:00',
-    rating_promedio: 4.5,
-    total_productos: 12,
-    total_ventas: 8,
-    rol: 'Vendedor'
-  },
-  {
-    id: 2,
-    cedula: '0987654321',
-    nombre: 'María',
-    apellido: 'González',
-    email: 'maria.gonzalez@email.com',
-    telefono: '0998765432',
-    direccion: 'Guayaquil, Ecuador',
-    genero: 'Femenino',
-    estado: true,
-    fecha_registro: '2024-02-20T14:20:00',
-    rating_promedio: 4.8,
-    total_productos: 25,
-    total_ventas: 18,
-    rol: 'Vendedor'
-  },
-  {
-    id: 3,
-    cedula: '1122334455',
-    nombre: 'Carlos',
-    apellido: 'Ramírez',
-    email: 'carlos.ramirez@email.com',
-    telefono: '0912345678',
-    direccion: 'Cuenca, Ecuador',
-    genero: 'Masculino',
-    estado: false,
-    fecha_registro: '2024-03-10T09:15:00',
-    rating_promedio: 2.5,
-    total_productos: 5,
-    total_ventas: 1,
-    rol: 'Comprador',
-    razon_suspension: 'Múltiples reportes de estafa'
-  },
-  {
-    id: 4,
-    cedula: '5544332211',
-    nombre: 'Ana',
-    apellido: 'Torres',
-    email: 'ana.torres@email.com',
-    telefono: '0923456789',
-    direccion: 'Loja, Ecuador',
-    genero: 'Femenino',
-    estado: true,
-    fecha_registro: '2024-04-05T16:45:00',
-    rating_promedio: 5.0,
-    total_productos: 30,
-    total_ventas: 28,
-    rol: 'Vendedor'
-  },
+  
   {
     id: 5,
     cedula: '6655443322',
