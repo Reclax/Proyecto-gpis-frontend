@@ -24,6 +24,11 @@ import MiPerfilPage from './pages/MiPerfilPage';
 import MisProductosPage from './pages/MisProductosPage';
 import NotificacionesPage from './pages/NotificacionesPage';
 import FavoritosPage from './pages/FavoritosPage';
+import AdminDashboardPage from './pages/AdminDashboardPage';
+import GestionUsuariosPage from './pages/GestionUsuariosPage';
+import GestionIncidenciasPage from './pages/GestionIncidenciasPage';
+import RegistroModeradorPage from './pages/RegistroModeradorPage';
+import GestionProductosPage from './pages/GestionProductosPage';
 
 function App() {
   return (
@@ -94,6 +99,38 @@ function Main() {
           <Route path="/favoritos" element={
             <ProtectedRoute>
               <FavoritosPage />
+            </ProtectedRoute>
+          } />
+
+          {/* Rutas de Administración - requieren autenticación y rol de admin */}
+          <Route path="/admin" element={
+            <ProtectedRoute>
+              <AdminDashboardPage />
+            </ProtectedRoute>
+          } />
+          <Route path="/admin/dashboard" element={
+            <ProtectedRoute>
+              <AdminDashboardPage />
+            </ProtectedRoute>
+          } />
+          <Route path="/admin/usuarios" element={
+            <ProtectedRoute>
+              <GestionUsuariosPage />
+            </ProtectedRoute>
+          } />
+          <Route path="/admin/incidencias" element={
+            <ProtectedRoute>
+              <GestionIncidenciasPage />
+            </ProtectedRoute>
+          } />
+          <Route path="/admin/moderadores" element={
+            <ProtectedRoute>
+              <RegistroModeradorPage />
+            </ProtectedRoute>
+          } />
+          <Route path="/admin/productos" element={
+            <ProtectedRoute>
+              <GestionProductosPage />
             </ProtectedRoute>
           } />
         </Routes>

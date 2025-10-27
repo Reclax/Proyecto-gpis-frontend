@@ -6,7 +6,8 @@ import {
   FiChevronLeft, 
   FiMessageCircle, 
   FiHeart, 
-  FiShare2
+  FiShare2,
+  FiFlag
 } from 'react-icons/fi';
 import { HiSparkles } from 'react-icons/hi2';
 import { MdVerified } from 'react-icons/md';
@@ -16,14 +17,17 @@ import {
   userAPI, 
   conversationAPI, 
   authAPI, 
-  favoriteAPI, 
-  API_BASE_URL 
+  favoriteAPI,
+  API_BASE_URL
 } from '../services/api';
+import ReportProductModal from '../components/ReportProductModal';
 
 // Componente para mostrar detalles del producto con funcionalidad de favoritos
 function ProductoDetallePage() {
   // Estado para modal de compartir
   const [shareModal, setShareModal] = useState(false);
+  // Estado para modal de reportar producto
+  const [reportModalOpen, setReportModalOpen] = useState(false);
   // Función para copiar la URL al portapapeles y mostrar modal
   const handleShare = async () => {
     try {
@@ -528,7 +532,7 @@ function ProductoDetallePage() {
                     <div className="w-12 h-12 rounded-full bg-gradient-to-br from-orange-400 to-orange-600 flex items-center justify-center text-white font-bold overflow-hidden">
                       {product.seller.avatar ? (
                         <img 
-                          src={product.seller.avatar} 
+                          src={product.seller.avatar}
                           alt={product.seller.name}
                           className="w-full h-full object-cover rounded-full"
                           onError={(e) => {
