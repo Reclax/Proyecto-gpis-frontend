@@ -23,7 +23,6 @@ function GestionUsuariosPage() {
   const [modalData, setModalData] = useState({ isOpen: false, type: 'info', title: '', message: '', onConfirm: null });
 
   useEffect(() => {
-    // Verificar acceso a gestión de usuarios
     const access = checkAdminAccess('gestionar_usuarios');
 
     if (!access.isAllowed) {
@@ -36,19 +35,17 @@ function GestionUsuariosPage() {
     const loadUsers = async () => {
       try {
         setLoading(true);
-        // Verificar autenticación igual que otras páginas
         if (!authAPI.isAuthenticated()) {
           navigate('/login');
           return;
         }
 
         const { data } = await api.get('/users/');
-        // Mapear respuesta del backend al formato usado por la UI
         const mapped = (Array.isArray(data) ? data : []).map((user) => {
           const backendRole = user?.Roles?.[0]?.roleName || 'Usuario';
           const rol = backendRole === 'Administrador' ? 'Admin'
                     : backendRole === 'Moderador' ? 'Moderador'
-                    : 'Comprador'; // "Usuario" => "Comprador"
+                    : 'Comprador'; 
           return {
             id: user.id,
             cedula: user.dni || '',
@@ -58,7 +55,7 @@ function GestionUsuariosPage() {
             telefono: user.phone || 'No disponible',
             direccion: 'No disponible',
             genero: 'No especificado',
-            estado: true, // Sin dato en API; por defecto activo
+            estado: true,
             fecha_registro: user.createdAt || new Date().toISOString(),
             rating_promedio: user.rating ? parseFloat(user.rating) : null,
             total_productos: 0,
@@ -89,7 +86,6 @@ function GestionUsuariosPage() {
     loadUsers();
   }, [navigate]);
 
-  // Filtrar usuarios
   const usuariosFiltrados = usuarios.filter(user => {
     const matchSearch =
       user.nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -108,7 +104,6 @@ function GestionUsuariosPage() {
     return matchSearch && matchEstado && matchRol;
   });
 
-  // Suspender/Activar usuario
   const toggleUserStatus = (user) => {
     const action = user.estado ? 'suspender' : 'activar';
     setModalData({
@@ -134,7 +129,6 @@ function GestionUsuariosPage() {
     });
   };
 
-  // Ver detalles del usuario
   const verDetalles = (user) => {
     setSelectedUser(user);
     setShowDropdown(null);
