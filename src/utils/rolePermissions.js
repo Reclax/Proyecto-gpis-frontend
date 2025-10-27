@@ -1,5 +1,5 @@
 import { authAPI } from '../services/api';
-import { PERMISOS_POR_ROL, ROLES } from '../config/roles';
+import { PERMISOS_POR_ROL, ROLES, obtenerPermisos, normalizeRole } from '../config/roles';
 
 /**
  * Obtiene el rol actual del usuario autenticado
@@ -16,7 +16,7 @@ export const getCurrentUserRole = () => {
     const token = document.cookie.match(/authToken=([^;]+)/)?.[1];
     if (token) {
       const payload = JSON.parse(atob(token.split('.')[1]));
-      return payload.roles?.[0];
+  return payload.roles?.[0];
     }
   } catch (err) {
     // Error decoding token
@@ -30,7 +30,8 @@ export const getCurrentUserRole = () => {
  */
 export const canAccessAdminPanel = () => {
   const role = getCurrentUserRole();
-  return role === ROLES.ADMIN || role === ROLES.MODERADOR;
+  const r = normalizeRole(role);
+  return r === ROLES.ADMIN || r === ROLES.MODERADOR;
 };
 
 /**
@@ -40,7 +41,7 @@ export const hasPermission = (permiso) => {
   const role = getCurrentUserRole();
   if (!role) return false;
 
-  const permisos = PERMISOS_POR_ROL[role];
+  const permisos = obtenerPermisos(role);
   return permisos?.[permiso] === true;
 };
 
@@ -48,29 +49,30 @@ export const hasPermission = (permiso) => {
  * Verifica si es Admin
  */
 export const isAdmin = () => {
-  return getCurrentUserRole() === ROLES.ADMIN;
+  const role = getCurrentUserRole();
+  return normalizeRole(role) === ROLES.ADMIN;
 };
 
 /**
  * Verifica si es Moderador
  */
 export const isModerator = () => {
-  return getCurrentUserRole() === ROLES.MODERADOR;
+  const role = getCurrentUserRole();
+  return normalizeRole(role) === ROLES.MODERADOR;
 };
 
 /**
  * Verifica si es Usuario regular
  */
 export const isRegularUser = () => {
-  return getCurrentUserRole() === ROLES.USUARIO;
+  const role = getCurrentUserRole();
+  return normalizeRole(role) === ROLES.USUARIO;
 };
 
 /**
  * Obtiene las páginas de admin disponibles según el rol
  */
 export const getAvailableAdminPages = () => {
-  const role = getCurrentUserRole();
-
   const allPages = [
     { label: 'Dashboard', path: '/admin', icon: 'FiBarChart2', available: true },
     { label: 'Gestionar Usuarios', path: '/admin/usuarios', permission: 'gestionar_usuarios' },

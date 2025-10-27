@@ -9,6 +9,7 @@ import {
 import NotificationIcon from './NotificationIcon';
 import useNotifications from '../../hooks/useNotifications';
 import { useWebSocket } from '../../hooks/useWebSocket';
+import { normalizeRole, ROLES } from '../../config/roles';
 
 function Header() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -18,7 +19,7 @@ function Header() {
   const [searchTerm, setSearchTerm] = useState('');
   const navigate = useNavigate();
 
-  const { unreadCount } = useNotifications();
+  useNotifications();
   const { connect: connectWS } = useWebSocket();
 
   useEffect(() => {
@@ -54,7 +55,7 @@ function Header() {
       const initWebSocket = async () => {
         try {
           await connectWS();
-        } catch (err) {
+        } catch {
           // Error connecting WebSocket
         }
       };
@@ -113,9 +114,9 @@ function Header() {
           const payload = JSON.parse(atob(token.split('.')[1]));
           return payload.roles?.[0] || 'Usuario';
         }
-      } catch (err) {
-        // Error decoding token
-      }
+      } catch {
+          // Error decoding token
+        }
     }
     return user.role || 'Usuario';
   };
@@ -131,9 +132,9 @@ function Header() {
           const payload = JSON.parse(atob(token.split('.')[1]));
           if (payload.email) return payload.email.split('@')[0];
         }
-      } catch (err) {
-        // Error decoding token
-      }
+      } catch {
+          // Error decoding token
+        }
     }
 
     if (user.email) return user.email.split('@')[0];
@@ -150,7 +151,8 @@ function Header() {
   };
 
   const getMenuOptions = (role) => {
-    if (role === 'Usuario') {
+    const r = normalizeRole(role);
+    if (r === ROLES.USUARIO) {
       return [
         { label: 'Mi Perfil', to: '/mi-perfil', icon: FiUser },
         { label: 'Mis Productos', to: '/mis-productos', icon: FiPackage },
@@ -159,7 +161,7 @@ function Header() {
       ];
     }
 
-    if (role === 'Moderador') {
+    if (r === ROLES.MODERADOR) {
       return [
         { label: 'Gestionar Incidencias', to: '/admin/incidencias', icon: FiAlertTriangle, section: 'moderacion' },
         { label: 'Gestionar Usuarios', to: '/admin/usuarios', icon: FiUsers, section: 'moderacion' },
@@ -168,8 +170,7 @@ function Header() {
         { label: 'Panel de Admin', to: '/admin', icon: FiBarChart2, isAdmin: true },
       ];
     }
-
-    if (role === 'Admin') {
+    if (r === ROLES.ADMIN) {
       return [
         { label: 'Gestionar Incidencias', to: '/admin/incidencias', icon: FiAlertTriangle, section: 'moderacion' },
         { label: 'Gestionar Usuarios', to: '/admin/usuarios', icon: FiUsers, section: 'moderacion' },
@@ -183,7 +184,8 @@ function Header() {
     return [];
   };
 
-  const userRole = userData ? getUserRole(userData) : 'Usuario';
+  const rawUserRole = userData ? getUserRole(userData) : ROLES.USUARIO;
+  const userRole = normalizeRole(rawUserRole);
   const menuOptions = getMenuOptions(userRole);
 
   return (

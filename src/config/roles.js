@@ -4,7 +4,9 @@
 export const ROLES = {
   USUARIO: 'Usuario',
   MODERADOR: 'Moderador',
-  ADMIN: 'Admin'
+  // El backend devuelve "Administrador" en la base de datos.
+  // Aceptamos también alias como 'Admin' para compatibilidad.
+  ADMIN: 'Administrador'
 };
 
 export const PERMISOS_POR_ROL = {
@@ -122,13 +124,14 @@ export const contienePalabrasProhibidas = (texto) => {
 
 // Función para obtener permisos de un rol
 export const obtenerPermisos = (rol) => {
-  return PERMISOS_POR_ROL[rol] || {};
+  const r = normalizeRole(rol);
+  return PERMISOS_POR_ROL[r] || {};
 };
 
 // Función para verificar si un usuario tiene un permiso específico
 export const tienePermiso = (rol, permiso) => {
   const permisos = obtenerPermisos(rol);
-  return permisos[permiso] === true;
+  return permisos?.[permiso] === true;
 };
 
 // Estados de usuario
@@ -160,8 +163,9 @@ export const obtenerEstadisticasModerador = (moderadorId, incidencias) => {
 
 // ⭐ NUEVA FUNCIÓN: Verificar si puede tomar incidencias
 export const puedeTomarIncidencia = (rol, estadisticasModerador) => {
-  if (rol === ROLES.ADMIN) return true;  // Admin siempre puede
-  if (rol === ROLES.MODERADOR) return estadisticasModerador.puedeTomar;
+  const r = normalizeRole(rol);
+  if (r === ROLES.ADMIN) return true;  // Admin siempre puede
+  if (r === ROLES.MODERADOR) return estadisticasModerador.puedeTomar;
   return false;
 };
 
@@ -176,6 +180,26 @@ export const obtenerMensajeValidacion = (estadisticasModerador) => {
   }
 
   return null;
+};
+
+// Normaliza distintas variantes/alias del rol que puedan venir del backend
+export const normalizeRole = (rol) => {
+  if (!rol) return rol;
+  if (typeof rol !== 'string') return rol;
+
+  const r = rol.trim();
+  // Mapa de alias comunes -> nombre canonical usado en PERMISOS_POR_ROL
+  const aliases = {
+    Admin: ROLES.ADMIN,
+    Administrator: ROLES.ADMIN,
+    Administrador: ROLES.ADMIN,
+    usuario: ROLES.USUARIO,
+    Usuario: ROLES.USUARIO,
+    Moderador: ROLES.MODERADOR,
+    moderador: ROLES.MODERADOR
+  };
+
+  return aliases[r] || r;
 };
 
 export default {
