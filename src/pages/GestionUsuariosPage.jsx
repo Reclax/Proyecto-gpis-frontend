@@ -5,34 +5,16 @@ import { MdBlock, MdVerified } from 'react-icons/md';
 import usePageTitle from '../hooks/usePageTitle';
 import Modal from '../components/common/Modal';
 import { checkAdminAccess } from '../utils/rolePermissions';
+import api, { authAPI, API_BASE_URL } from '../services/api';
 
-// Datos demo de usuarios
-const usuariosDemo = [
-  
-  {
-    id: 5,
-    cedula: '6655443322',
-    nombre: 'Laura',
-    apellido: 'Moderadora',
-    email: 'laura.mod@email.com',
-    telefono: '0934567890',
-    direccion: 'Quito, Ecuador',
-    genero: 'Femenino',
-    estado: true,
-    fecha_registro: '2024-05-01T12:00:00',
-    rating_promedio: null,
-    total_productos: 0,
-    total_ventas: 0,
-    rol: 'Moderador'
-  }
-];
+//
 
 function GestionUsuariosPage() {
   usePageTitle('Gestión de Usuarios');
   const navigate = useNavigate();
   const [isAuthorized, setIsAuthorized] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [usuarios, setUsuarios] = useState(usuariosDemo);
+  const [usuarios, setUsuarios] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterEstado, setFilterEstado] = useState('todos');
   const [filterRol, setFilterRol] = useState('todos');
@@ -50,7 +32,61 @@ function GestionUsuariosPage() {
     }
 
     setIsAuthorized(true);
-    setLoading(false);
+
+    const loadUsers = async () => {
+      try {
+        setLoading(true);
+        // Verificar autenticación igual que otras páginas
+        if (!authAPI.isAuthenticated()) {
+          navigate('/login');
+          return;
+        }
+
+        const { data } = await api.get('/users/');
+        // Mapear respuesta del backend al formato usado por la UI
+        const mapped = (Array.isArray(data) ? data : []).map((user) => {
+          const backendRole = user?.Roles?.[0]?.roleName || 'Usuario';
+          const rol = backendRole === 'Administrador' ? 'Admin'
+                    : backendRole === 'Moderador' ? 'Moderador'
+                    : 'Comprador'; // "Usuario" => "Comprador"
+          return {
+            id: user.id,
+            cedula: user.dni || '',
+            nombre: user.name || '',
+            apellido: user.lastname || '',
+            email: user.email || '',
+            telefono: user.phone || 'No disponible',
+            direccion: 'No disponible',
+            genero: 'No especificado',
+            estado: true, // Sin dato en API; por defecto activo
+            fecha_registro: user.createdAt || new Date().toISOString(),
+            rating_promedio: user.rating ? parseFloat(user.rating) : null,
+            total_productos: 0,
+            total_ventas: 0,
+            rol,
+            avatarUrl: user.avatarUrl ? `${API_BASE_URL}${user.avatarUrl}` : null,
+          };
+        });
+        setUsuarios(mapped);
+      } catch (error) {
+        console.error('Error al cargar usuarios:', error);
+        if (error.response?.status === 401) {
+          navigate('/login');
+          return;
+        }
+        setModalData({
+          isOpen: true,
+          type: 'error',
+          title: 'Error',
+          message: 'No se pudieron cargar los usuarios. Intenta nuevamente.',
+          confirmText: 'Entendido',
+        });
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadUsers();
   }, [navigate]);
 
   // Filtrar usuarios
