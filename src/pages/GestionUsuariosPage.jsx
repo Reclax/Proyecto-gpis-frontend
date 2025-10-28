@@ -45,7 +45,7 @@ function GestionUsuariosPage() {
           const backendRole = user?.Roles?.[0]?.roleName || 'Usuario';
           const rol = backendRole === 'Administrador' ? 'Admin'
                     : backendRole === 'Moderador' ? 'Moderador'
-                    : 'Comprador'; 
+                    : 'Usuario'; 
           return {
             id: user.id,
             cedula: user.dni || '',
@@ -141,8 +141,7 @@ function GestionUsuariosPage() {
 
   const getRoleColor = (rol) => {
     switch(rol) {
-      case 'Vendedor': return 'bg-blue-100 text-blue-800';
-      case 'Comprador': return 'bg-green-100 text-green-800';
+      case 'Usuario': return 'bg-blue-100 text-blue-800';
       case 'Moderador': return 'bg-purple-100 text-purple-800';
       case 'Admin': return 'bg-orange-100 text-orange-800';
       default: return 'bg-gray-100 text-gray-800';
@@ -217,8 +216,7 @@ function GestionUsuariosPage() {
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
               >
                 <option value="todos">Todos los roles</option>
-                <option value="Vendedor">Vendedor</option>
-                <option value="Comprador">Comprador</option>
+                <option value="Usuario">Usuario</option>
                 <option value="Moderador">Moderador</option>
                 <option value="Admin">Admin</option>
               </select>
@@ -244,8 +242,8 @@ function GestionUsuariosPage() {
               <p className="text-sm text-gray-600">Moderadores</p>
             </div>
             <div className="text-center">
-              <p className="text-2xl font-bold text-orange-600">{usuarios.filter(u => u.rol === 'Vendedor').length}</p>
-              <p className="text-sm text-gray-600">Vendedores</p>
+              <p className="text-2xl font-bold text-orange-600">{usuarios.filter(u => u.rol === 'Usuario').length}</p>
+              <p className="text-sm text-gray-600">Usuarios</p>
             </div>
           </div>
         </div>
@@ -466,10 +464,10 @@ function GestionUsuariosPage() {
                 </div>
               </div>
 
-              {/* Estadísticas (solo para vendedores) */}
-              {selectedUser.rol === 'Vendedor' && (
+              {/* Estadísticas de actividad (para usuarios regulares) */}
+              {selectedUser.rol === 'Usuario' && (
                 <div className="border-t border-gray-200 pt-6">
-                  <h3 className="text-lg font-bold text-gray-900 mb-4">Estadísticas de Venta</h3>
+                  <h3 className="text-lg font-bold text-gray-900 mb-4">Estadísticas</h3>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div className="bg-blue-50 rounded-lg p-4 text-center">
                       <p className="text-3xl font-bold text-blue-600">{selectedUser.total_productos}</p>
@@ -522,6 +520,7 @@ function GestionUsuariosPage() {
         type={modalData.type}
         title={modalData.title}
         message={modalData.message}
+        onClose={() => setModalData({ ...modalData, isOpen: false })}
         onConfirm={modalData.onConfirm}
         confirmText={modalData.confirmText || 'Confirmar'}
         cancelText={modalData.cancelText}

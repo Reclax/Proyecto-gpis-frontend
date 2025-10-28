@@ -377,6 +377,11 @@ export const categoryAPI = {
   getMain: async () => {
     const response = await api.get('/categories/main');
     return response.data;
+  },
+
+  getById: async (id) => {
+    const response = await api.get(`/categories/${id}`);
+    return response.data;
   }
 };
 

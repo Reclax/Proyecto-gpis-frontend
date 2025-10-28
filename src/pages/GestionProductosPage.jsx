@@ -5,117 +5,23 @@ import { MdBlock, MdVerified } from 'react-icons/md';
 import usePageTitle from '../hooks/usePageTitle';
 import Modal from '../components/common/Modal';
 import { checkAdminAccess } from '../utils/rolePermissions';
+import { productAPI, categoryAPI, API_BASE_URL } from '../services/api';
 
-// Datos demo de productos
-const productosDemo = [
-  {
-    id: 1,
-    codigo: 'PROD-001',
-    titulo: 'iPhone 13 Pro Max',
-    descripcion: 'En perfecto estado, batería al 95%',
-    precio: 850,
-    ubicacion: 'Quito, Ecuador',
-    tipo: 'producto',
-    estado: 'activo',
-    condicion: 'activo',
-    fecha_publicacion: '2025-01-20T10:00:00',
-    vendedor: 'Juan Pérez',
-    vendedor_id: 1,
-    categoria: 'Electrónica',
-    es_peligroso: false,
-    reportes: 0,
-    foto: '/uploads/products/iphone.jpg'
-  },
-  {
-    id: 2,
-    codigo: 'PROD-002',
-    titulo: 'Cuchillo táctico militar',
-    descripcion: 'Cuchillo de supervivencia profesional',
-    precio: 45,
-    ubicacion: 'Guayaquil, Ecuador',
-    tipo: 'producto',
-    estado: 'suspendido',
-    condicion: 'activo',
-    fecha_publicacion: '2025-01-22T15:30:00',
-    vendedor: 'Carlos Ramírez',
-    vendedor_id: 3,
-    categoria: 'Deportes',
-    es_peligroso: true,
-    razon_suspension: 'Detectado como producto potencialmente peligroso',
-    fecha_suspension: '2025-01-23T10:00:00',
-    reportes: 2,
-    foto: '/uploads/products/cuchillo.jpg'
-  },
-  {
-    id: 3,
-    codigo: 'PROD-003',
-    titulo: 'Servicio de Plomería',
-    descripcion: 'Reparación e instalación de tuberías profesional',
-    precio: 25,
-    ubicacion: 'Cuenca, Ecuador',
-    tipo: 'servicio',
-    estado: 'activo',
-    condicion: 'activo',
-    fecha_publicacion: '2025-01-15T08:00:00',
-    vendedor: 'María González',
-    vendedor_id: 2,
-    categoria: 'Servicios',
-    es_peligroso: false,
-    horario_atencion: 'Lunes a Viernes 8:00 - 18:00',
-    reportes: 0
-  },
-  {
-    id: 4,
-    codigo: 'PROD-004',
-    titulo: 'Laptop HP Pavilion',
-    descripcion: 'Intel i5, 8GB RAM, 256GB SSD, Pantalla 15.6"',
-    precio: 450,
-    ubicacion: 'Loja, Ecuador',
-    tipo: 'producto',
-    estado: 'pendiente',
-    condicion: 'activo',
-    fecha_publicacion: '2025-01-24T12:00:00',
-    vendedor: 'Ana Torres',
-    vendedor_id: 4,
-    categoria: 'Electrónica',
-    es_peligroso: false,
-    reportes: 0,
-    foto: '/uploads/products/laptop.jpg'
-  },
-  {
-    id: 5,
-    codigo: 'PROD-005',
-    titulo: 'Pistola de aire comprimido',
-    descripcion: 'Arma de juguete para práctica de tiro',
-    precio: 65,
-    ubicacion: 'Ambato, Ecuador',
-    tipo: 'producto',
-    estado: 'suspendido',
-    condicion: 'activo',
-    fecha_publicacion: '2025-01-19T14:20:00',
-    vendedor: 'Roberto Gómez',
-    vendedor_id: 5,
-    categoria: 'Deportes',
-    es_peligroso: true,
-    razon_suspension: 'Producto clasificado como arma de fuego simulada - prohibido',
-    fecha_suspension: '2025-01-21T09:00:00',
-    reportes: 5,
-    foto: '/uploads/products/gun.jpg'
-  }
-];
+// Sin datos estáticos: cargaremos desde la API
 
 function GestionProductosPage() {
   usePageTitle('Gestión de Productos');
   const navigate = useNavigate();
   const [isAuthorized, setIsAuthorized] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [productos, setProductos] = useState(productosDemo);
+  const [productos, setProductos] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterEstado, setFilterEstado] = useState('todos');
   const [filterTipo, setFilterTipo] = useState('todos');
-  const [selectedProduct, setSelectedProduct] = useState(null);
+  // Selección no requerida actualmente
   const [expandedId, setExpandedId] = useState(null);
   const [modalData, setModalData] = useState({ isOpen: false, type: 'info', title: '', message: '', onConfirm: null });
+  const [categoryCache, setCategoryCache] = useState({}); // id -> category object
 
   useEffect(() => {
     // Verificar acceso a gestión de productos
@@ -127,7 +33,52 @@ function GestionProductosPage() {
     }
 
     setIsAuthorized(true);
-    setLoading(false);
+    // Cargar productos desde el API
+    const load = async () => {
+      try {
+        const data = await productAPI.getAll();
+        // Mapear al modelo usado en esta vista sin datos estáticos
+        const mapped = (Array.isArray(data) ? data : []).map(p => {
+          const firstPhoto = p.ProductPhotos && p.ProductPhotos.length > 0 ? p.ProductPhotos[0].url : null;
+          const foto = firstPhoto ? (firstPhoto.startsWith('http') ? firstPhoto : `${API_BASE_URL}${firstPhoto}`) : null;
+          // Mapear estado del backend a etiquetas locales
+          const estadoMap = {
+            active: 'activo',
+            suspended: 'suspendido',
+            pending: 'pendiente',
+            deleted: 'eliminado'
+          };
+          const estadoLocal = estadoMap[p.status] || 'activo';
+          return {
+            id: p.id,
+            codigo: `PROD-${p.id}`,
+            titulo: p.title,
+            descripcion: p.description || '',
+            precio: p.price,
+            ubicacion: p.location || '',
+            tipo: 'producto',
+            estado: estadoLocal,
+            condicion: estadoLocal,
+            fecha_publicacion: p.createdAt || new Date().toISOString(),
+            vendedor: `ID ${p.sellerId}`,
+            vendedor_id: p.sellerId,
+            categoria: `ID ${p.categoryId}`,
+            es_peligroso: false,
+            reportes: 0,
+            foto,
+            // Guardar datos crudos para el modal
+            _raw: p
+          };
+        });
+        setProductos(mapped);
+      } catch {
+        setProductos([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    load();
   }, [navigate]);
 
   // Filtrar productos
@@ -162,7 +113,6 @@ function GestionProductosPage() {
           message: `El producto ha sido ${accion === 'activar' ? 'activado' : 'suspendido'} correctamente`,
           confirmText: 'Entendido'
         });
-        setSelectedProduct(null);
       },
       confirmText: accion === 'activar' ? 'Activar' : 'Suspender',
       cancelText: 'Cancelar'
@@ -174,8 +124,8 @@ function GestionProductosPage() {
     setModalData({
       isOpen: true,
       type: 'warning',
-      title: 'Marcar como Peligroso',
-      message: `¿Estás seguro de marcar "${producto.titulo}" como producto peligroso?\n\nEsto:\n- Suspenderá automáticamente el producto\n- Lo ocultará de todos los usuarios\n- Notificará al vendedor\n- Permitirá una apelación`,
+      title: 'Reportar',
+      message: `¿Estás seguro de reportar "${producto.titulo}"?\n\nEsto:\n- Suspenderá automáticamente el producto\n- Lo ocultará de todos los usuarios\n- Notificará al vendedor\n- Permitirá una apelación`,
       onConfirm: () => {
         setProductos(prev =>
           prev.map(p => p.id === producto.id ? {
@@ -193,9 +143,8 @@ function GestionProductosPage() {
           message: 'El producto ha sido marcado como peligroso y suspendido automáticamente. El vendedor ha sido notificado.',
           confirmText: 'Entendido'
         });
-        setSelectedProduct(null);
       },
-      confirmText: 'Marcar como Peligroso',
+      confirmText: 'Reportar',
       cancelText: 'Cancelar'
     });
   };
@@ -224,7 +173,6 @@ function GestionProductosPage() {
           message: 'El producto ha sido reactivado y está disponible nuevamente en la plataforma.',
           confirmText: 'Entendido'
         });
-        setSelectedProduct(null);
       },
       confirmText: 'Revertir',
       cancelText: 'Cancelar'
@@ -360,7 +308,32 @@ function GestionProductosPage() {
                 {/* Encabezado */}
                 <div
                   className="p-6 cursor-pointer hover:bg-gray-50 transition"
-                  onClick={() => setExpandedId(expandedId === producto.id ? null : producto.id)}
+                  onClick={async () => {
+                    const willExpand = expandedId !== producto.id;
+                    const nextId = willExpand ? producto.id : null;
+                    setExpandedId(nextId);
+                    // Al expandir, cargar nombre de categoría si no está en cache
+                    if (willExpand) {
+                      const catId = producto?._raw?.categoryId;
+                      if (catId) {
+                        const cached = categoryCache[catId];
+                        if (cached) {
+                          // Reemplazar texto si aún es "ID X"
+                          if (typeof producto.categoria === 'string' && producto.categoria.startsWith('ID ')) {
+                            setProductos(prev => prev.map(p => p.id === producto.id ? { ...p, categoria: cached.name } : p));
+                          }
+                        } else {
+                          try {
+                            const cat = await categoryAPI.getById(catId);
+                            setCategoryCache(prev => ({ ...prev, [catId]: cat }));
+                            setProductos(prev => prev.map(p => p.id === producto.id ? { ...p, categoria: cat.name } : p));
+                          } catch {
+                            // Ignorar errores silenciosamente; mantener "ID X"
+                          }
+                        }
+                      }
+                    }
+                  }}
                 >
                   <div className="flex items-start justify-between">
                     <div className="flex-1">
@@ -391,7 +364,6 @@ function GestionProductosPage() {
 
                       <div className="flex items-center gap-6 text-sm text-gray-600 mt-3 flex-wrap">
                         <span>Precio: <span className="font-bold text-gray-900">${producto.precio}</span></span>
-                        <span>Vendedor: <span className="font-bold text-gray-900">{producto.vendedor}</span></span>
                         <span>Ubicación: <span className="font-bold text-gray-900">{producto.ubicacion}</span></span>
                         <span>Publicado: <span className="font-bold text-gray-900">{formatDate(producto.fecha_publicacion)}</span></span>
                       </div>
@@ -457,6 +429,15 @@ function GestionProductosPage() {
                     {/* Botones de acción */}
                     <div className="border-t border-gray-300 pt-6">
                       <div className="flex flex-wrap gap-3">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            navigate(`/producto/${producto.id}`);
+                          }}
+                          className="px-4 py-2 border-2 border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 font-semibold flex items-center gap-2"
+                        >
+                          <FiEye /> Ver producto
+                        </button>
                         {producto.estado === 'activo' && (
                           <button
                             onClick={() => cambiarEstadoProducto(producto, 'suspendido')}
@@ -481,7 +462,7 @@ function GestionProductosPage() {
                             className="px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white font-semibold rounded-lg transition"
                           >
                             <FiAlertTriangle className="inline mr-2" />
-                            Marcar como Peligroso
+                            Reportar
                           </button>
                         )}
                         {producto.es_peligroso && (
@@ -493,6 +474,7 @@ function GestionProductosPage() {
                             Revertir Marca Peligroso
                           </button>
                         )}
+                        {/* Datos API button removed as requested */}
                       </div>
                     </div>
                   </div>
@@ -509,11 +491,14 @@ function GestionProductosPage() {
         type={modalData.type}
         title={modalData.title}
         message={modalData.message}
+        onClose={() => setModalData({ ...modalData, isOpen: false })}
         onConfirm={modalData.onConfirm}
         confirmText={modalData.confirmText || 'Confirmar'}
         cancelText={modalData.cancelText}
         onCancel={() => setModalData({ ...modalData, isOpen: false })}
       />
+
+      {/* Datos API modal removed as requested */}
     </div>
   );
 }
