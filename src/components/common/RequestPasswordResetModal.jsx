@@ -31,7 +31,6 @@ function RequestPasswordResetModal({ isOpen, initialEmail = '', onClose }) {
     } catch (err) {
       const status = err?.response?.status;
       const serverMessage = err?.response?.data?.message;
-      // No revelar si el correo existe o no por seguridad
       if (status === 429) {
         setErrorMessage(serverMessage || 'Demasiados intentos. Intenta de nuevo en unos minutos.');
       } else {
