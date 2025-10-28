@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { FiUser, FiMail, FiPhone, FiMapPin, FiLock, FiShield, FiCheck } from 'react-icons/fi';
 import usePageTitle from '../hooks/usePageTitle';
 import Modal from '../components/common/Modal';
-import { checkAdminAccess, isAdmin } from '../utils/rolePermissions';
+import { authAPI } from '../services/api';
+import { checkAdminAccess } from '../utils/rolePermissions';
 
 function RegistroModeradorPage() {
   usePageTitle('Registrar Moderador');
@@ -16,8 +17,6 @@ function RegistroModeradorPage() {
     apellido: '',
     email: '',
     telefono: '',
-    direccion: '',
-    genero: '',
     password: '',
     confirmPassword: ''
   });
@@ -91,8 +90,8 @@ function RegistroModeradorPage() {
       return false;
     }
 
-    // Validar campos requeridos
-    if (!formData.nombre || !formData.apellido || !formData.genero) {
+    // Validar campos requeridos según backend: nombre, apellido, telefono, email
+    if (!formData.nombre || !formData.apellido || !formData.telefono || !formData.email) {
       setModalData({
         isOpen: true,
         type: 'error',
@@ -119,11 +118,22 @@ function RegistroModeradorPage() {
       onConfirm: async () => {
         setFormLoading(true);
         try {
-          // Aquí iría la llamada al API
-          // await adminAPI.registerModerator(formData);
+          // Construir FormData en el mismo formato que RegisterPage
+          const registerFormData = new FormData();
+          registerFormData.append('dni', formData.cedula.toString());
+          registerFormData.append('email', formData.email);
+          registerFormData.append('name', formData.nombre);
+          registerFormData.append('lastname', formData.apellido);
+          registerFormData.append('password', formData.password);
+          if (formData.telefono) registerFormData.append('phone', formData.telefono.toString());
 
-          // Simulación de éxito
-          await new Promise(resolve => setTimeout(resolve, 1000));
+          // roleId: 3 -> Moderador según tu backend
+          registerFormData.append('roleId', '3');
+
+          // Si en el futuro se agrega avatar, se puede append('avatar', file)
+
+          // Llamar al endpoint público de registro (backend enviará verificación por email)
+          await authAPI.register(registerFormData);
 
           setModalData({
             isOpen: true,
@@ -141,17 +151,29 @@ function RegistroModeradorPage() {
             apellido: '',
             email: '',
             telefono: '',
-            direccion: '',
-            genero: '',
             password: '',
             confirmPassword: ''
           });
         } catch (error) {
+          // Manejo de errores similar a RegisterPage
+          let message = 'Hubo un error al registrar el moderador. Por favor intenta nuevamente.';
+          if (error.code === 'ECONNABORTED') {
+            message = 'La operación tardó demasiado tiempo. El servidor puede estar sobrecargado.';
+          } else if (error.response?.status === 400) {
+            message = error.response.data?.message || error.response.data?.error || 'Email, DNI ya registrado o rol no válido';
+          } else if (error.response?.status === 500) {
+            message = error.response.data?.message || error.response.data?.error || 'Error interno del servidor';
+          } else if (error.code === 'ECONNREFUSED') {
+            message = 'No se puede conectar al servidor. Verifica que el backend esté corriendo.';
+          } else {
+            message = error.response?.data?.message || error.response?.data?.error || error.message || message;
+          }
+
           setModalData({
             isOpen: true,
             type: 'error',
             title: 'Error al Registrar',
-            message: 'Hubo un error al registrar el moderador. Por favor intenta nuevamente.',
+            message,
             confirmText: 'Entendido'
           });
         } finally {
@@ -219,24 +241,7 @@ function RegistroModeradorPage() {
               </div>
             </div>
 
-            {/* Género */}
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-2">
-                Género <span className="text-red-500">*</span>
-              </label>
-              <select
-                name="genero"
-                value={formData.genero}
-                onChange={handleChange}
-                required
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-              >
-                <option value="">Selecciona...</option>
-                <option value="Masculino">Masculino</option>
-                <option value="Femenino">Femenino</option>
-                <option value="Otro">Otro</option>
-              </select>
-            </div>
+            {/* (Campo 'Género' eliminado — no es requerido por el backend) */}
 
             {/* Nombre */}
             <div>
@@ -251,25 +256,6 @@ function RegistroModeradorPage() {
                   value={formData.nombre}
                   onChange={handleChange}
                   placeholder="Juan"
-                  required
-                  className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-                />
-              </div>
-            </div>
-
-            {/* Apellido */}
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-2">
-                Apellido <span className="text-red-500">*</span>
-              </label>
-              <div className="relative">
-                <FiUser className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                <input
-                  type="text"
-                  name="apellido"
-                  value={formData.apellido}
-                  onChange={handleChange}
-                  placeholder="Pérez"
                   required
                   className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
                 />
@@ -295,10 +281,28 @@ function RegistroModeradorPage() {
               </div>
             </div>
 
+            {/* Apellido */}
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-2">
+                Apellido <span className="text-red-500">*</span>
+              </label>
+              <div className="relative">
+                <FiUser className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input
+                  type="text"
+                  name="apellido"
+                  value={formData.apellido}
+                  onChange={handleChange}
+                  placeholder="Pérez"
+                  required
+                  className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                />
+              </div>
+            </div>
             {/* Teléfono */}
             <div>
               <label className="block text-sm font-semibold text-gray-700 mb-2">
-                Teléfono
+                Teléfono <span className="text-red-500">*</span>
               </label>
               <div className="relative">
                 <FiPhone className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
@@ -308,28 +312,15 @@ function RegistroModeradorPage() {
                   value={formData.telefono}
                   onChange={handleChange}
                   placeholder="0987654321"
+                  pattern="[0-9]{10}"
+                  maxLength="10"
+                  required
                   className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
                 />
               </div>
             </div>
 
-            {/* Dirección */}
-            <div className="md:col-span-2">
-              <label className="block text-sm font-semibold text-gray-700 mb-2">
-                Dirección
-              </label>
-              <div className="relative">
-                <FiMapPin className="absolute left-3 top-3 text-gray-400" />
-                <textarea
-                  name="direccion"
-                  value={formData.direccion}
-                  onChange={handleChange}
-                  placeholder="Dirección completa..."
-                  rows="2"
-                  className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
-                />
-              </div>
-            </div>
+            {/* (Se eliminó campo Dirección porque el backend no lo espera en /users/register) */}
 
             {/* Contraseña */}
             <div>
@@ -351,8 +342,8 @@ function RegistroModeradorPage() {
               <p className="text-xs text-gray-500 mt-1">Mínimo 8 caracteres, incluye mayúsculas y números</p>
             </div>
 
-            {/* Confirmar Contraseña */}
-            <div>
+            {/* Confirmar Contraseña (columna derecha) */}
+            <div className="md:col-start-2">
               <label className="block text-sm font-semibold text-gray-700 mb-2">
                 Confirmar Contraseña <span className="text-red-500">*</span>
               </label>
