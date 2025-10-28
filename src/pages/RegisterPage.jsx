@@ -13,7 +13,7 @@ function RegisterPage() {
     confirmPassword: '',
     phone: '',
     avatarUrl: null,
-    roleName: 'Usuario' // Rol por defecto (cambiado de 'User' a 'Usuario')
+    roleName: 'Usuario' 
   });
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
@@ -29,7 +29,6 @@ function RegisterPage() {
       ...prev,
       [name]: value
     }));
-    // Limpiar mensajes cuando el usuario empiece a escribir
     if (error) setError('');
     if (success) setSuccess('');
   };
@@ -37,17 +36,14 @@ function RegisterPage() {
   const handleFileChange = (e) => {
     const file = e.target.files[0];
     if (file) {
-      // Limpiar mensajes de error
       if (error) setError('');
       if (success) setSuccess('');
       
-      // Verificar tamaño del archivo (máximo 2MB)
       if (file.size > 2 * 1024 * 1024) {
         setError('La imagen es demasiado grande. Por favor, selecciona una imagen menor a 2MB.');
         return;
       }
       
-      // Crear preview de la imagen para mostrar al usuario
       const reader = new FileReader();
       reader.onload = (e) => {
         const previewUrl = e.target.result;
@@ -61,7 +57,6 @@ function RegisterPage() {
         avatarUrl: file // Guardamos el File original
       }));
       
-  // Archivo seleccionado: file.name, Tamaño: (file.size / 1024).toFixed(2) + ' KB'
       
     } else {
       // Si no hay archivo, limpiar el preview
@@ -86,7 +81,6 @@ function RegisterPage() {
       setError('Email no válido');
       return false;
     }
-    // Validar todos los campos requeridos por el backend
     if (!formData.dni || !formData.name || !formData.lastname || !formData.phone || !formData.email) {
       setError('Todos los campos son requeridos');
       return false;

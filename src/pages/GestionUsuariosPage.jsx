@@ -5,98 +5,16 @@ import { MdBlock, MdVerified } from 'react-icons/md';
 import usePageTitle from '../hooks/usePageTitle';
 import Modal from '../components/common/Modal';
 import { checkAdminAccess } from '../utils/rolePermissions';
+import api, { authAPI, API_BASE_URL } from '../services/api';
 
-// Datos demo de usuarios
-const usuariosDemo = [
-  {
-    id: 1,
-    cedula: '1234567890',
-    nombre: 'Juan',
-    apellido: 'Pérez',
-    email: 'juan.perez@email.com',
-    telefono: '0987654321',
-    direccion: 'Quito, Ecuador',
-    genero: 'Masculino',
-    estado: true,
-    fecha_registro: '2024-01-15T10:30:00',
-    rating_promedio: 4.5,
-    total_productos: 12,
-    total_ventas: 8,
-    rol: 'Vendedor'
-  },
-  {
-    id: 2,
-    cedula: '0987654321',
-    nombre: 'María',
-    apellido: 'González',
-    email: 'maria.gonzalez@email.com',
-    telefono: '0998765432',
-    direccion: 'Guayaquil, Ecuador',
-    genero: 'Femenino',
-    estado: true,
-    fecha_registro: '2024-02-20T14:20:00',
-    rating_promedio: 4.8,
-    total_productos: 25,
-    total_ventas: 18,
-    rol: 'Vendedor'
-  },
-  {
-    id: 3,
-    cedula: '1122334455',
-    nombre: 'Carlos',
-    apellido: 'Ramírez',
-    email: 'carlos.ramirez@email.com',
-    telefono: '0912345678',
-    direccion: 'Cuenca, Ecuador',
-    genero: 'Masculino',
-    estado: false,
-    fecha_registro: '2024-03-10T09:15:00',
-    rating_promedio: 2.5,
-    total_productos: 5,
-    total_ventas: 1,
-    rol: 'Comprador',
-    razon_suspension: 'Múltiples reportes de estafa'
-  },
-  {
-    id: 4,
-    cedula: '5544332211',
-    nombre: 'Ana',
-    apellido: 'Torres',
-    email: 'ana.torres@email.com',
-    telefono: '0923456789',
-    direccion: 'Loja, Ecuador',
-    genero: 'Femenino',
-    estado: true,
-    fecha_registro: '2024-04-05T16:45:00',
-    rating_promedio: 5.0,
-    total_productos: 30,
-    total_ventas: 28,
-    rol: 'Vendedor'
-  },
-  {
-    id: 5,
-    cedula: '6655443322',
-    nombre: 'Laura',
-    apellido: 'Moderadora',
-    email: 'laura.mod@email.com',
-    telefono: '0934567890',
-    direccion: 'Quito, Ecuador',
-    genero: 'Femenino',
-    estado: true,
-    fecha_registro: '2024-05-01T12:00:00',
-    rating_promedio: null,
-    total_productos: 0,
-    total_ventas: 0,
-    rol: 'Moderador'
-  }
-];
+//
 
 function GestionUsuariosPage() {
   usePageTitle('Gestión de Usuarios');
   const navigate = useNavigate();
   const [isAuthorized, setIsAuthorized] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [usuarios, setUsuarios] = useState(usuariosDemo);
+  const [usuarios, setUsuarios] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterEstado, setFilterEstado] = useState('todos');
   const [filterRol, setFilterRol] = useState('todos');
@@ -105,7 +23,6 @@ function GestionUsuariosPage() {
   const [modalData, setModalData] = useState({ isOpen: false, type: 'info', title: '', message: '', onConfirm: null });
 
   useEffect(() => {
-    // Verificar acceso a gestión de usuarios
     const access = checkAdminAccess('gestionar_usuarios');
 
     if (!access.isAllowed) {
@@ -114,10 +31,61 @@ function GestionUsuariosPage() {
     }
 
     setIsAuthorized(true);
-    setLoading(false);
+
+    const loadUsers = async () => {
+      try {
+        setLoading(true);
+        if (!authAPI.isAuthenticated()) {
+          navigate('/login');
+          return;
+        }
+
+        const { data } = await api.get('/users/');
+        const mapped = (Array.isArray(data) ? data : []).map((user) => {
+          const backendRole = user?.Roles?.[0]?.roleName || 'Usuario';
+          const rol = backendRole === 'Administrador' ? 'Admin'
+                    : backendRole === 'Moderador' ? 'Moderador'
+                    : 'Comprador'; 
+          return {
+            id: user.id,
+            cedula: user.dni || '',
+            nombre: user.name || '',
+            apellido: user.lastname || '',
+            email: user.email || '',
+            telefono: user.phone || 'No disponible',
+            direccion: 'No disponible',
+            genero: 'No especificado',
+            estado: true,
+            fecha_registro: user.createdAt || new Date().toISOString(),
+            rating_promedio: user.rating ? parseFloat(user.rating) : null,
+            total_productos: 0,
+            total_ventas: 0,
+            rol,
+            avatarUrl: user.avatarUrl ? `${API_BASE_URL}${user.avatarUrl}` : null,
+          };
+        });
+        setUsuarios(mapped);
+      } catch (error) {
+        console.error('Error al cargar usuarios:', error);
+        if (error.response?.status === 401) {
+          navigate('/login');
+          return;
+        }
+        setModalData({
+          isOpen: true,
+          type: 'error',
+          title: 'Error',
+          message: 'No se pudieron cargar los usuarios. Intenta nuevamente.',
+          confirmText: 'Entendido',
+        });
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadUsers();
   }, [navigate]);
 
-  // Filtrar usuarios
   const usuariosFiltrados = usuarios.filter(user => {
     const matchSearch =
       user.nombre.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -136,7 +104,6 @@ function GestionUsuariosPage() {
     return matchSearch && matchEstado && matchRol;
   });
 
-  // Suspender/Activar usuario
   const toggleUserStatus = (user) => {
     const action = user.estado ? 'suspender' : 'activar';
     setModalData({
@@ -162,7 +129,6 @@ function GestionUsuariosPage() {
     });
   };
 
-  // Ver detalles del usuario
   const verDetalles = (user) => {
     setSelectedUser(user);
     setShowDropdown(null);
