@@ -6,8 +6,7 @@ import {
   FiChevronLeft, 
   FiMessageCircle, 
   FiHeart, 
-  FiShare2,
-  FiFlag
+  FiShare2
 } from 'react-icons/fi';
 import { HiSparkles } from 'react-icons/hi2';
 import { MdVerified } from 'react-icons/md';
