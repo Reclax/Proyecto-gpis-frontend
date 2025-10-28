@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { authAPI } from '../services/api';
 import logo from '../assets/Logo de Shop&Buy.png';
 import usePageTitle from '../hooks/usePageTitle';
+import RequestPasswordResetModal from '../components/common/RequestPasswordResetModal';
 
 function LoginPage() {
   usePageTitle('Iniciar Sesión');
@@ -13,6 +14,7 @@ function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  const [showResetModal, setShowResetModal] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -87,20 +89,6 @@ function LoginPage() {
       const redirectUrl = urlParams.get('redirect') || location.state?.from?.pathname || '/';
       navigate(redirectUrl);
     } catch (err) {
-      // Error en login
-      /**
-       * error 403: Credenciales inválidas
-       * 403
-Undocumented
-Error: Forbidden
-
-Response body
-Download
-{
-  "message": "Cuenta no verificada. Revisa tu correo para verificarla o solicita un reenvío.",
-  "code": "UNVERIFIED_ACCOUNT"
-}
-       */
       const status = err?.response?.status;
       const serverCode = err?.response?.data?.code;
       const serverMessage = err?.response?.data?.message;
@@ -219,13 +207,14 @@ Download
                 />
                 <span className="ml-2 text-sm text-gray-600">Recordarme</span>
               </label>
-              <Link
-                to="#"
+              <button
+                type="button"
+                onClick={() => setShowResetModal(true)}
                 className="text-sm font-medium hover:underline"
                 style={{ color: '#CF5C36' }}
               >
                 ¿Olvidaste tu contraseña?
-              </Link>
+              </button>
             </div>
 
             {/* Mensaje de error */}
@@ -295,6 +284,13 @@ Download
             </div>
           </div>
         </div>
+
+        {/* Modal: Recuperar contraseña */}
+        <RequestPasswordResetModal
+          isOpen={showResetModal}
+          initialEmail={formData.email}
+          onClose={() => setShowResetModal(false)}
+        />
       </div>
     </div>
   );
