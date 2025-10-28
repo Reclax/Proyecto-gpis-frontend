@@ -491,6 +491,7 @@ function GestionProductosPage() {
         type={modalData.type}
         title={modalData.title}
         message={modalData.message}
+        onClose={() => setModalData({ ...modalData, isOpen: false })}
         onConfirm={modalData.onConfirm}
         confirmText={modalData.confirmText || 'Confirmar'}
         cancelText={modalData.cancelText}
