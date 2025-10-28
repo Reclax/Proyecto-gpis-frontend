@@ -18,7 +18,7 @@ export const getCurrentUserRole = () => {
       const payload = JSON.parse(atob(token.split('.')[1]));
   return payload.roles?.[0];
     }
-  } catch (err) {
+  } catch {
     // Error decoding token
   }
 
