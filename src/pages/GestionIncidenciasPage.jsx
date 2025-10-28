@@ -4,114 +4,114 @@ import { FiAlertTriangle, FiCalendar, FiFilter, FiEye, FiCheck, FiX, FiClock, Fi
 import { MdBlock, MdVerified } from 'react-icons/md';
 import usePageTitle from '../hooks/usePageTitle';
 import Modal from '../components/common/Modal';
-import { checkAdminAccess } from '../utils/rolePermissions';
 import {
   obtenerEstadisticasModerador,
   puedeTomarIncidencia,
   obtenerMensajeValidacion,
   LIMITES_INCIDENCIAS
 } from '../config/roles';
+import api, { API_BASE_URL, productAPI, userAPI } from '../services/api';
 
-// Datos demo de incidencias
-const incidenciasDemo = [
-  {
-    id: 1,
-    fecha_incidencia: '2025-01-24T10:30:00',
-    estado: 'pendiente',
-    descripcion: 'Producto detectado con palabras prohibidas: "arma", "droga"',
-    tipo: 'deteccion_automatica',
-    producto: {
-      id: 101,
-      codigo: 'PROD-101',
-      titulo: 'Producto sospechoso #1',
-      vendedor: 'Juan Pérez',
-      vendedor_id: 1,
-      precio: 150,
-      foto: '/uploads/products/default.jpg'
-    },
-    moderador_id: null,
-    moderador_nombre: null,
-    vendedor_id: 1,
-    apelaciones: [],
-    puede_apelar: false
-  },
-  {
-    id: 2,
-    fecha_incidencia: '2025-01-23T14:20:00',
-    estado: 'en_revision',
-    descripcion: 'Reporte de usuario: Producto no corresponde a la descripción',
-    tipo: 'reporte_usuario',
-    producto: {
-      id: 102,
-      codigo: 'PROD-102',
-      titulo: 'Laptop HP usada',
-      vendedor: 'María González',
-      vendedor_id: 2,
-      precio: 450,
-      foto: '/uploads/products/default.jpg'
-    },
-    moderador_id: 3,
-    moderador_nombre: 'Carlos Moderador',
-    vendedor_id: 2,
-    reporte: {
-      tipo_reporte: 'descripcion_incorrecta',
-      comentario: 'Las especificaciones no son las que aparecen en la publicación',
-      usuario_reporte: 'Pedro Morales',
-      usuario_reporte_id: 5
-    },
-    apelaciones: [],
-    puede_apelar: false
-  },
-  {
-    id: 3,
-    fecha_incidencia: '2025-01-22T09:15:00',
-    estado: 'resuelto',
-    descripcion: 'Producto marcado como peligroso - Verificado y aprobado tras apelación',
-    tipo: 'deteccion_automatica',
-    producto: {
-      id: 103,
-      codigo: 'PROD-103',
-      titulo: 'Cuchillo de cocina profesional',
-      vendedor: 'Ana Torres',
-      vendedor_id: 4,
-      precio: 85,
-      foto: '/uploads/products/default.jpg'
-    },
-    moderador_id: 4,
-    moderador_nombre: 'Laura Moderadora',
-    vendedor_id: 4,
-    apelaciones: [
-      {
-        id: 1,
-        fecha_apelacion: '2025-01-22T10:00:00',
-        descripcion: 'Es un cuchillo de cocina profesional, no un arma. Adjunto certificados de importación y uso comercial.',
-        estado: 'aprobada',
-        moderador_revisor: 'Laura Moderadora',
-        decision_final: 'Aprobado tras verificación de certificados'
-      }
-    ],
-    puede_apelar: false,
-    decision_final: 'aprobado'
-  }
-];
-
-// Datos demo de moderadores
-const moderadoresDemo = [
-  { id: 1, nombre: 'Laura Moderadora', email: 'laura@email.com' },
-  { id: 2, nombre: 'Carlos Moderador', email: 'carlos@email.com' },
-  { id: 3, nombre: 'María Moderadora', email: 'maria@email.com' }
-];
+//
 
 function GestionIncidenciasPage() {
   usePageTitle('Gestión de Incidencias');
-  const [incidencias, setIncidencias] = useState(incidenciasDemo);
+  const navigate = useNavigate();
+  const [incidencias, setIncidencias] = useState([]);
   const [filterEstado, setFilterEstado] = useState('todas');
   const [filterTipo, setFilterTipo] = useState('todos');
   const [selectedIncidencia, setSelectedIncidencia] = useState(null);
   const [modalData, setModalData] = useState({ isOpen: false, type: 'info', title: '', message: '', onConfirm: null });
   const [decisionReason, setDecisionReason] = useState('');
-  const [userRole, setUserRole] = useState('Admin'); // Demo: cambiar a 'Moderador' para probar
-  const [moderadorId, setModeradorId] = useState(1); // Demo: ID del moderador actual
+  const [userRole] = useState('Admin'); // Demo: cambiar a 'Moderador' para probar
+  const [moderadorId] = useState(1); // Demo: ID del moderador actual
+
+  useEffect(() => {
+    const loadIncidences = async () => {
+      try {
+        const { data } = await api.get('/incidences');
+        const list = Array.isArray(data) ? data : [];
+
+        const mapped = await Promise.all(
+          list.map(async (inc) => {
+            // Obtener producto
+            let product = null;
+            try {
+              product = await productAPI.getProductById(inc.productId);
+            } catch {
+              product = null;
+            }
+
+            // Construir datos de producto
+            let titulo = `Producto ${inc.productId}`;
+            let precio = 0;
+            let vendedorNombre = `ID ${product?.sellerId || inc.userId || '-'}`;
+            let vendedorId = product?.sellerId || inc.userId || null;
+            let foto = null;
+            let codigo = `PROD-${inc.productId}`;
+
+            if (product) {
+              titulo = product.title || titulo;
+              precio = product.price ?? 0;
+              vendedorId = product.sellerId ?? vendedorId;
+              const firstPhoto = product.ProductPhotos && product.ProductPhotos[0]?.url;
+              foto = firstPhoto ? (firstPhoto.startsWith('http') ? firstPhoto : `${API_BASE_URL}${firstPhoto}`) : null;
+              codigo = `PROD-${product.id}`;
+              // Intentar obtener nombre del vendedor
+              if (vendedorId) {
+                try {
+                  const seller = await userAPI.getUserById(vendedorId);
+                  vendedorNombre = `${seller.name || ''} ${seller.lastname || ''}`.trim() || vendedorNombre;
+                } catch { /* ignorar */ }
+              }
+            }
+
+            // Obtener nombre del moderador si aplica
+            let moderadorNombre = null;
+            if (inc.moderatorId) {
+              try {
+                const mod = await userAPI.getUserById(inc.moderatorId);
+                moderadorNombre = `${mod.name || ''} ${mod.lastname || ''}`.trim() || null;
+              } catch { /* ignorar */ }
+            }
+
+            // Mapear estado
+            const estadoMap = { pending: 'pendiente', in_review: 'en_revision', reviewing: 'en_revision', resolved: 'resuelto' };
+            const estado = estadoMap[inc.status] || inc.status || 'pendiente';
+
+            return {
+              id: inc.id,
+              fecha_incidencia: inc.dateIncidence || new Date().toISOString(),
+              estado,
+              descripcion: inc.description || '',
+              tipo: 'reporte_usuario',
+              producto: {
+                id: product?.id || inc.productId,
+                codigo,
+                titulo,
+                vendedor: vendedorNombre,
+                vendedor_id: vendedorId,
+                precio,
+                foto
+              },
+              moderador_id: inc.moderatorId || null,
+              moderador_nombre: moderadorNombre,
+              vendedor_id: vendedorId,
+              apelaciones: [],
+              puede_apelar: false
+            };
+          })
+        );
+
+        setIncidencias(mapped);
+      } catch (error) {
+        console.error('Error al cargar incidencias:', error);
+        setIncidencias([]);
+      }
+    };
+
+    loadIncidences();
+  }, []);
 
   const incidenciasFiltradas = incidencias.filter(inc => {
     const matchEstado = filterEstado === 'todas' || inc.estado === filterEstado;
@@ -412,10 +412,6 @@ function GestionIncidenciasPage() {
                         <h4 className="font-bold text-gray-900 mb-4">Información del Producto</h4>
                         <div className="space-y-3 text-sm">
                           <div>
-                            <p className="text-gray-600 font-semibold">Código</p>
-                            <p className="text-gray-900">{incidencia.producto.codigo}</p>
-                          </div>
-                          <div>
                             <p className="text-gray-600 font-semibold">Precio</p>
                             <p className="text-gray-900">${incidencia.producto.precio}</p>
                           </div>
@@ -430,6 +426,7 @@ function GestionIncidenciasPage() {
                       <div>
                         <h4 className="font-bold text-gray-900 mb-4">Detalles</h4>
                         <div className="space-y-3 text-sm">
+
                           <div>
                             <p className="text-gray-600 font-semibold">Tipo</p>
                             <p className="text-gray-900">
@@ -444,6 +441,16 @@ function GestionIncidenciasPage() {
                           )}
                         </div>
                       </div>
+                    </div>
+
+                    {/* Acciones generales */}
+                    <div className="mb-6">
+                      <button
+                        onClick={() => navigate(`/producto/${incidencia.producto.id}`)}
+                        className="px-4 py-2 border-2 border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 font-semibold flex items-center gap-2"
+                      >
+                        <FiEye /> Ver producto
+                      </button>
                     </div>
 
                     {/* Apelaciones */}

@@ -5,7 +5,7 @@ import { MdBlock, MdVerified } from 'react-icons/md';
 import usePageTitle from '../hooks/usePageTitle';
 import Modal from '../components/common/Modal';
 import { checkAdminAccess } from '../utils/rolePermissions';
-import { productAPI, API_BASE_URL } from '../services/api';
+import { productAPI, categoryAPI, API_BASE_URL } from '../services/api';
 
 // Sin datos estáticos: cargaremos desde la API
 
@@ -21,6 +21,7 @@ function GestionProductosPage() {
   // Selección no requerida actualmente
   const [expandedId, setExpandedId] = useState(null);
   const [modalData, setModalData] = useState({ isOpen: false, type: 'info', title: '', message: '', onConfirm: null });
+  const [categoryCache, setCategoryCache] = useState({}); // id -> category object
 
   useEffect(() => {
     // Verificar acceso a gestión de productos
@@ -123,8 +124,8 @@ function GestionProductosPage() {
     setModalData({
       isOpen: true,
       type: 'warning',
-      title: 'Marcar como Peligroso',
-      message: `¿Estás seguro de marcar "${producto.titulo}" como producto peligroso?\n\nEsto:\n- Suspenderá automáticamente el producto\n- Lo ocultará de todos los usuarios\n- Notificará al vendedor\n- Permitirá una apelación`,
+      title: 'Reportar',
+      message: `¿Estás seguro de reportar "${producto.titulo}"?\n\nEsto:\n- Suspenderá automáticamente el producto\n- Lo ocultará de todos los usuarios\n- Notificará al vendedor\n- Permitirá una apelación`,
       onConfirm: () => {
         setProductos(prev =>
           prev.map(p => p.id === producto.id ? {
@@ -143,7 +144,7 @@ function GestionProductosPage() {
           confirmText: 'Entendido'
         });
       },
-      confirmText: 'Marcar como Peligroso',
+      confirmText: 'Reportar',
       cancelText: 'Cancelar'
     });
   };
@@ -307,7 +308,32 @@ function GestionProductosPage() {
                 {/* Encabezado */}
                 <div
                   className="p-6 cursor-pointer hover:bg-gray-50 transition"
-                  onClick={() => setExpandedId(expandedId === producto.id ? null : producto.id)}
+                  onClick={async () => {
+                    const willExpand = expandedId !== producto.id;
+                    const nextId = willExpand ? producto.id : null;
+                    setExpandedId(nextId);
+                    // Al expandir, cargar nombre de categoría si no está en cache
+                    if (willExpand) {
+                      const catId = producto?._raw?.categoryId;
+                      if (catId) {
+                        const cached = categoryCache[catId];
+                        if (cached) {
+                          // Reemplazar texto si aún es "ID X"
+                          if (typeof producto.categoria === 'string' && producto.categoria.startsWith('ID ')) {
+                            setProductos(prev => prev.map(p => p.id === producto.id ? { ...p, categoria: cached.name } : p));
+                          }
+                        } else {
+                          try {
+                            const cat = await categoryAPI.getById(catId);
+                            setCategoryCache(prev => ({ ...prev, [catId]: cat }));
+                            setProductos(prev => prev.map(p => p.id === producto.id ? { ...p, categoria: cat.name } : p));
+                          } catch {
+                            // Ignorar errores silenciosamente; mantener "ID X"
+                          }
+                        }
+                      }
+                    }
+                  }}
                 >
                   <div className="flex items-start justify-between">
                     <div className="flex-1">
@@ -338,7 +364,6 @@ function GestionProductosPage() {
 
                       <div className="flex items-center gap-6 text-sm text-gray-600 mt-3 flex-wrap">
                         <span>Precio: <span className="font-bold text-gray-900">${producto.precio}</span></span>
-                        <span>Vendedor: <span className="font-bold text-gray-900">{producto.vendedor}</span></span>
                         <span>Ubicación: <span className="font-bold text-gray-900">{producto.ubicacion}</span></span>
                         <span>Publicado: <span className="font-bold text-gray-900">{formatDate(producto.fecha_publicacion)}</span></span>
                       </div>
@@ -437,7 +462,7 @@ function GestionProductosPage() {
                             className="px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white font-semibold rounded-lg transition"
                           >
                             <FiAlertTriangle className="inline mr-2" />
-                            Marcar como Peligroso
+                            Reportar
                           </button>
                         )}
                         {producto.es_peligroso && (
