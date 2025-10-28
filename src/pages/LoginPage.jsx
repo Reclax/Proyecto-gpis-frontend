@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { authAPI } from '../services/api';
 import logo from '../assets/Logo de Shop&Buy.png';
 import usePageTitle from '../hooks/usePageTitle';
+import RequestPasswordResetModal from '../components/common/RequestPasswordResetModal';
 
 function LoginPage() {
   usePageTitle('Iniciar Sesión');
@@ -13,6 +14,7 @@ function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  const [showResetModal, setShowResetModal] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -26,7 +28,7 @@ function LoginPage() {
     if (error) setError('');
   };
 
-  const handleSubmit = async (e) => {
+   const handleSubmit = async (e) => {
     e.preventDefault();
     setIsLoading(true);
     setError('');
@@ -82,12 +84,22 @@ function LoginPage() {
       }
 
       // Redirigir a la página solicitada, desde state o query param, o home por defecto
+      
       const urlParams = new URLSearchParams(window.location.search);
       const redirectUrl = urlParams.get('redirect') || location.state?.from?.pathname || '/';
       navigate(redirectUrl);
-    } catch {
-      // Error en login
-      setError('Error al iniciar sesión. Inténtalo de nuevo.');
+    } catch (err) {
+      const status = err?.response?.status;
+      const serverCode = err?.response?.data?.code;
+      const serverMessage = err?.response?.data?.message;
+
+      if (serverCode === 'UNVERIFIED_ACCOUNT' || status === 403) {
+        setError(serverMessage || 'Cuenta no verificada. Revisa tu correo para verificarla o solicita un reenvío.');
+      } else if (status === 400) {
+        setError(serverMessage || 'Credenciales inválidas.');
+      } else {
+        setError('Error al iniciar sesión. Inténtalo de nuevo.');
+      }
     } finally {
       setIsLoading(false);
     }
@@ -195,13 +207,14 @@ function LoginPage() {
                 />
                 <span className="ml-2 text-sm text-gray-600">Recordarme</span>
               </label>
-              <Link
-                to="#"
+              <button
+                type="button"
+                onClick={() => setShowResetModal(true)}
                 className="text-sm font-medium hover:underline"
                 style={{ color: '#CF5C36' }}
               >
                 ¿Olvidaste tu contraseña?
-              </Link>
+              </button>
             </div>
 
             {/* Mensaje de error */}
@@ -271,6 +284,13 @@ function LoginPage() {
             </div>
           </div>
         </div>
+
+        {/* Modal: Recuperar contraseña */}
+        <RequestPasswordResetModal
+          isOpen={showResetModal}
+          initialEmail={formData.email}
+          onClose={() => setShowResetModal(false)}
+        />
       </div>
     </div>
   );

@@ -117,6 +117,12 @@ export const authAPI = {
     });
     return response.data;
   },
+  
+  // Solicitar recuperación de contraseña
+  requestPasswordReset: async (email) => {
+    const response = await api.post('/users/request-password-reset', { email });
+    return response.data;
+  },
 
   register: async (formData) => {
     const response = await api.post('/users/register', formData, {
