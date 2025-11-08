@@ -573,4 +573,28 @@ export const favoriteAPI = {
   }
 };
 
+// ====== API de Incidencias ======
+export const incidenceAPI = {
+  getAll: async () => {
+    const response = await api.get('/incidences');
+    return response.data;
+  },
+  getById: async (id) => {
+    const response = await api.get(`/incidences/${id}`);
+    return response.data;
+  }
+};
+
+// ====== API de Reportes ======
+export const reportAPI = {
+  getAll: async () => {
+    const response = await api.get('/reports');
+    return response.data;
+  },
+  getById: async (id) => {
+    const response = await api.get(`/reports/${id}`);
+    return response.data;
+  }
+};
+
 export default api;

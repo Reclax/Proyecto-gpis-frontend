@@ -1,3 +1,4 @@
+
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { FiAlertTriangle, FiCalendar, FiFilter, FiEye, FiCheck, FiX, FiClock, FiChevronDown, FiMessageSquare, FiInfo } from 'react-icons/fi';
@@ -10,7 +11,7 @@ import {
   obtenerMensajeValidacion,
   LIMITES_INCIDENCIAS
 } from '../config/roles';
-import api, { API_BASE_URL, productAPI, userAPI } from '../services/api';
+import { API_BASE_URL, productAPI, userAPI, incidenceAPI, reportAPI } from '../services/api';
 
 //
 
@@ -27,90 +28,137 @@ function GestionIncidenciasPage() {
   const [moderadorId] = useState(1); // Demo: ID del moderador actual
 
   useEffect(() => {
-    const loadIncidences = async () => {
+    const loadData = async () => {
       try {
-        const { data } = await api.get('/incidences');
-        const list = Array.isArray(data) ? data : [];
+        // Obtener incidencias y reportes en paralelo
+        const [rawIncidences, rawReports] = await Promise.all([
+          incidenceAPI.getAll().catch(() => []),
+          reportAPI.getAll().catch(() => [])
+        ]);
 
-        const mapped = await Promise.all(
-          list.map(async (inc) => {
-            // Obtener producto
-            let product = null;
-            try {
-              product = await productAPI.getProductById(inc.productId);
-            } catch {
-              product = null;
-            }
+        const incidencesArray = Array.isArray(rawIncidences) ? rawIncidences : [];
+        const reportsArray = Array.isArray(rawReports) ? rawReports : [];
 
-            // Construir datos de producto
-            let titulo = `Producto ${inc.productId}`;
-            let precio = 0;
-            let vendedorNombre = `ID ${product?.sellerId || inc.userId || '-'}`;
-            let vendedorId = product?.sellerId || inc.userId || null;
-            let foto = null;
-            let codigo = `PROD-${inc.productId}`;
+        // Reunir todos los productIds únicos para hacer fetch de producto/seller
+        const allProductIds = [
+          ...new Set([
+            ...incidencesArray.map(i => i.productId).filter(Boolean),
+            ...reportsArray.map(r => r.productId).filter(Boolean)
+          ])
+        ];
 
-            if (product) {
-              titulo = product.title || titulo;
-              precio = product.price ?? 0;
-              vendedorId = product.sellerId ?? vendedorId;
-              const firstPhoto = product.ProductPhotos && product.ProductPhotos[0]?.url;
-              foto = firstPhoto ? (firstPhoto.startsWith('http') ? firstPhoto : `${API_BASE_URL}${firstPhoto}`) : null;
-              codigo = `PROD-${product.id}`;
-              // Intentar obtener nombre del vendedor
-              if (vendedorId) {
-                try {
-                  const seller = await userAPI.getUserById(vendedorId);
-                  vendedorNombre = `${seller.name || ''} ${seller.lastname || ''}`.trim() || vendedorNombre;
-                } catch { /* ignorar */ }
-              }
-            }
+        // Cache local de productos para evitar llamadas repetidas
+        const productCache = {};
+        for (const pid of allProductIds) {
+          try {
+            const p = await productAPI.getProductById(pid);
+            productCache[pid] = p;
+          } catch {
+            productCache[pid] = null;
+          }
+        }
 
-            // Obtener nombre del moderador si aplica
-            let moderadorNombre = null;
-            if (inc.moderatorId) {
-              try {
-                const mod = await userAPI.getUserById(inc.moderatorId);
-                moderadorNombre = `${mod.name || ''} ${mod.lastname || ''}`.trim() || null;
-              } catch { /* ignorar */ }
-            }
+        // Cache de vendedores
+        const sellerCache = {};
+        const sellerIds = [
+          ...new Set(Object.values(productCache).map(p => p?.sellerId).filter(Boolean))
+        ];
+        for (const sid of sellerIds) {
+          try {
+            const s = await userAPI.getUserById(sid);
+            sellerCache[sid] = s;
+          } catch {
+            sellerCache[sid] = null;
+          }
+        }
 
-            // Mapear estado
-            const estadoMap = { pending: 'pendiente', in_review: 'en_revision', reviewing: 'en_revision', resolved: 'resuelto' };
-            const estado = estadoMap[inc.status] || inc.status || 'pendiente';
+        const estadoMap = { pending: 'pendiente', in_review: 'en_revision', reviewing: 'en_revision', resolved: 'resuelto' };
 
-            return {
-              id: inc.id,
-              fecha_incidencia: inc.dateIncidence || new Date().toISOString(),
-              estado,
-              descripcion: inc.description || '',
-              tipo: 'reporte_usuario',
-              producto: {
-                id: product?.id || inc.productId,
-                codigo,
-                titulo,
-                vendedor: vendedorNombre,
-                vendedor_id: vendedorId,
-                precio,
-                foto
-              },
-              moderador_id: inc.moderatorId || null,
-              moderador_nombre: moderadorNombre,
+        // Mapear incidencias (detección automática)
+        const mappedIncidences = incidencesArray.map(inc => {
+          const product = productCache[inc.productId];
+          const vendedorId = product?.sellerId || inc.userId || null;
+          const vendedorObj = vendedorId ? sellerCache[vendedorId] : null;
+          const vendedorNombre = vendedorObj ? `${vendedorObj.name || ''} ${vendedorObj.lastname || ''}`.trim() || `ID ${vendedorId}` : `ID ${vendedorId || '-'}`;
+
+          let moderadorNombre = null;
+          if (inc.moderatorId) {
+            moderadorNombre = `Moderador ${inc.moderatorId}`; // Se podría enriquecer con userAPI si necesario
+          }
+
+            const firstPhoto = product?.ProductPhotos && product.ProductPhotos[0]?.url;
+            const foto = firstPhoto ? (firstPhoto.startsWith('http') ? firstPhoto : `${API_BASE_URL}${firstPhoto}`) : null;
+
+          return {
+            id: inc.id,
+            fecha_incidencia: inc.dateIncidence || new Date().toISOString(),
+            estado: estadoMap[inc.status] || inc.status || 'pendiente',
+            descripcion: inc.description || '',
+            tipo: 'deteccion_automatica',
+            producto: {
+              id: product?.id || inc.productId,
+              codigo: `PROD-${inc.productId}`,
+              titulo: product?.title || `Producto ${inc.productId}`,
+              vendedor: vendedorNombre,
               vendedor_id: vendedorId,
-              apelaciones: [],
-              puede_apelar: false
-            };
-          })
-        );
+              precio: product?.price ?? 0,
+              foto
+            },
+            moderador_id: inc.moderatorId || null,
+            moderador_nombre: moderadorNombre,
+            vendedor_id: vendedorId,
+            apelaciones: [],
+            puede_apelar: false
+          };
+        });
 
-        setIncidencias(mapped);
-      } catch (error) {
-        console.error('Error al cargar incidencias:', error);
+        // Mapear reportes (reporte de usuario)
+        const mappedReports = reportsArray.map(rep => {
+          const product = productCache[rep.productId];
+          const vendedorId = product?.sellerId || rep.userId || null;
+          const vendedorObj = vendedorId ? sellerCache[vendedorId] : null;
+          const vendedorNombre = vendedorObj ? `${vendedorObj.name || ''} ${vendedorObj.lastname || ''}`.trim() || `ID ${vendedorId}` : `ID ${vendedorId || '-'}`;
+
+          const firstPhoto = product?.ProductPhotos && product.ProductPhotos[0]?.url;
+          const foto = firstPhoto ? (firstPhoto.startsWith('http') ? firstPhoto : `${API_BASE_URL}${firstPhoto}`) : null;
+
+          return {
+            id: rep.id,
+            fecha_incidencia: rep.dateReport || new Date().toISOString(),
+            estado: 'pendiente', // Los reportes comienzan como pendientes
+            descripcion: rep.description || '',
+            tipo: 'reporte_usuario',
+            producto: {
+              id: product?.id || rep.productId,
+              codigo: `PROD-${rep.productId}`,
+              titulo: product?.title || `Producto ${rep.productId}`,
+              vendedor: vendedorNombre,
+              vendedor_id: vendedorId,
+              precio: product?.price ?? 0,
+              foto
+            },
+            moderador_id: null,
+            moderador_nombre: null,
+            vendedor_id: vendedorId,
+            reporte: {
+              comentario: rep.description || '',
+              usuario_id: rep.userId || null
+            },
+            apelaciones: [],
+            puede_apelar: false
+          };
+        });
+
+        // Combinar y ordenar por fecha (más recientes primero)
+        const combined = [...mappedIncidences, ...mappedReports].sort((a, b) => new Date(b.fecha_incidencia) - new Date(a.fecha_incidencia));
+        setIncidencias(combined);
+      } catch (err) {
+        console.error('Error al cargar incidencias/reportes:', err);
         setIncidencias([]);
       }
     };
 
-    loadIncidences();
+    loadData();
   }, []);
 
   const incidenciasFiltradas = incidencias.filter(inc => {
@@ -552,6 +600,7 @@ function GestionIncidenciasPage() {
         confirmText={modalData.confirmText || 'Confirmar'}
         cancelText={modalData.cancelText}
         onCancel={() => setModalData({ ...modalData, isOpen: false })}
+        onClose={() => setModalData({ ...modalData, isOpen: false })}
       />
     </div>
   );
