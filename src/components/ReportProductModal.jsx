@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { FiX, FiAlertTriangle, FiCheck } from 'react-icons/fi';
 import Modal from './common/Modal';
+import { authAPI, reportAPI } from '../services/api';
 
 function ReportProductModal({ isOpen, onClose, productId, productTitle }) {
   const [reportData, setReportData] = useState({
@@ -58,40 +59,42 @@ function ReportProductModal({ isOpen, onClose, productId, productTitle }) {
       return;
     }
 
+    // Verificar autenticación y obtener userId del token/cookie
+    if (!authAPI.isAuthenticated()) {
+      setErrorMessage('Debes iniciar sesión para reportar.');
+      return;
+    }
+
+    const user = authAPI.getUserData();
+    const userId = user?.id ? parseInt(user.id) : null;
+    if (!userId) {
+      setErrorMessage('No se pudo obtener tu usuario. Vuelve a iniciar sesión.');
+      return;
+    }
+
     setLoading(true);
     try {
-      // Aquí iría la llamada al backend cuando esté disponible
-      // const response = await reportAPI.createReport({
-      //   product_id: productId,
-      //   tipo_reporte: reportData.tipo_reporte,
-      //   comentario: reportData.comentario
-      // });
+      const payload = {
+        typeReport: reportData.tipo_reporte,
+        description: reportData.comentario,
+        userId,
+        productId,
+        dateReport: new Date().toISOString()
+      };
 
-      // Por ahora, simulamos el envío exitoso
-      console.log('Reporte enviado:', {
-        product_id: productId,
-        ...reportData,
-        fecha_reporte: new Date().toISOString()
-      });
+      await reportAPI.create(payload);
 
-      // Mostrar modal de éxito
+      // Éxito
       setSuccessModal(true);
-
-      // Limpiar formulario
-      setReportData({
-        tipo_reporte: '',
-        comentario: ''
-      });
-
-      // Cerrar modal después de 2 segundos
+      setReportData({ tipo_reporte: '', comentario: '' });
       setTimeout(() => {
         setSuccessModal(false);
         onClose();
-      }, 2000);
-
+      }, 1800);
     } catch (error) {
-      setErrorMessage('Error al enviar el reporte. Intenta de nuevo.');
-      console.error('Error:', error);
+      const msg = error?.response?.data?.message || 'Error al enviar el reporte. Intenta de nuevo.';
+      setErrorMessage(msg);
+      console.error('Error enviando reporte:', error);
     } finally {
       setLoading(false);
     }

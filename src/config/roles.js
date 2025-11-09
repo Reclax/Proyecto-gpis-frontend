@@ -88,6 +88,7 @@ export const ESTADOS_PRODUCTO = {
 export const ESTADOS_INCIDENCIA = {
   PENDIENTE: 'pendiente',
   EN_REVISION: 'en_revision',
+  SUSPENDIDO: 'suspendido',
   RESUELTO: 'resuelto'
 };
 
@@ -164,8 +165,8 @@ export const obtenerEstadisticasModerador = (moderadorId, incidencias) => {
 // ⭐ NUEVA FUNCIÓN: Verificar si puede tomar incidencias
 export const puedeTomarIncidencia = (rol, estadisticasModerador) => {
   const r = normalizeRole(rol);
-  if (r === ROLES.ADMIN) return true;  // Admin siempre puede
-  if (r === ROLES.MODERADOR) return estadisticasModerador.puedeTomar;
+  // Tanto Admin como Moderador respetan el límite de incidencias activas
+  if (r === ROLES.ADMIN || r === ROLES.MODERADOR) return estadisticasModerador.puedeTomar;
   return false;
 };
 
