@@ -102,34 +102,34 @@ function Main() {
             </ProtectedRoute>
           } />
 
-          {/* Rutas de Administración - requieren autenticación y rol de admin */}
+          {/* Rutas de Administración - autenticación y rol Administrador requerido */}
           <Route path="/admin" element={
-            <ProtectedRoute>
+            <ProtectedRoute allowedRoles={["Administrador"]}>
               <AdminDashboardPage />
             </ProtectedRoute>
           } />
           <Route path="/admin/dashboard" element={
-            <ProtectedRoute>
+            <ProtectedRoute allowedRoles={["Administrador"]}>
               <AdminDashboardPage />
             </ProtectedRoute>
           } />
           <Route path="/admin/usuarios" element={
-            <ProtectedRoute>
+            <ProtectedRoute allowedRoles={["Administrador"]}>
               <GestionUsuariosPage />
             </ProtectedRoute>
           } />
           <Route path="/admin/incidencias" element={
-            <ProtectedRoute>
+            <ProtectedRoute allowedRoles={["Administrador"]}>
               <GestionIncidenciasPage />
             </ProtectedRoute>
           } />
           <Route path="/admin/moderadores" element={
-            <ProtectedRoute>
+            <ProtectedRoute allowedRoles={["Administrador"]}>
               <RegistroModeradorPage />
             </ProtectedRoute>
           } />
           <Route path="/admin/productos" element={
-            <ProtectedRoute>
+            <ProtectedRoute allowedRoles={["Administrador"]}>
               <GestionProductosPage />
             </ProtectedRoute>
           } />

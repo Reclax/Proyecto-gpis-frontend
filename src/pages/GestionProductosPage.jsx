@@ -18,6 +18,10 @@ function GestionProductosPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterEstado, setFilterEstado] = useState('todos');
   const [filterTipo, setFilterTipo] = useState('todos');
+  // Filtro por estado de moderación: todos | active | review | block
+  const [filterModeracion, setFilterModeracion] = useState('todos');
+  // Filtro por origen de alerta (incidencia/reporte) si disponible en _raw
+  const [filterOrigen, setFilterOrigen] = useState('todos');
   // Selección no requerida actualmente
   const [expandedId, setExpandedId] = useState(null);
   const [modalData, setModalData] = useState({ isOpen: false, type: 'info', title: '', message: '', onConfirm: null });
@@ -36,7 +40,11 @@ function GestionProductosPage() {
     // Cargar productos desde el API
     const load = async () => {
       try {
-        const data = await productAPI.getAll();
+        // Usar endpoint de moderación para incluir moderationStatus
+        const data = await productAPI.getModerationList().catch(async () => {
+          // Fallback si endpoint no disponible
+          return await productAPI.getAll();
+        });
         // Mapear al modelo usado en esta vista sin datos estáticos
         const mapped = (Array.isArray(data) ? data : []).map(p => {
           const firstPhoto = p.ProductPhotos && p.ProductPhotos.length > 0 ? p.ProductPhotos[0].url : null;
@@ -49,6 +57,7 @@ function GestionProductosPage() {
             deleted: 'eliminado'
           };
           const estadoLocal = estadoMap[p.status] || 'activo';
+          const moderationStatus = p.moderationStatus || 'active'; // active | review | block
           return {
             id: p.id,
             codigo: `PROD-${p.id}`,
@@ -66,6 +75,7 @@ function GestionProductosPage() {
             es_peligroso: false,
             reportes: 0,
             foto,
+            moderationStatus,
             // Guardar datos crudos para el modal
             _raw: p
           };
@@ -90,8 +100,12 @@ function GestionProductosPage() {
 
     const matchEstado = filterEstado === 'todos' || prod.estado === filterEstado;
     const matchTipo = filterTipo === 'todos' || prod.tipo === filterTipo;
+    const matchModeracion = filterModeracion === 'todos' || prod.moderationStatus === filterModeracion;
+    // Origen: marca automática si fue bloqueado por incidencia/reporte (simulado si _raw tiene incidenceCount/reportCount)
+    const origen = prod._raw?.lastModerationSource || (prod._raw?.incidenceCount > 0 ? 'incidencia' : (prod._raw?.reportCount > 0 ? 'reporte' : 'ninguno'));
+    const matchOrigen = filterOrigen === 'todos' || origen === filterOrigen;
 
-    return matchSearch && matchEstado && matchTipo;
+    return matchSearch && matchEstado && matchTipo && matchModeracion && matchOrigen;
   });
 
   // Cambiar estado del producto
@@ -102,17 +116,35 @@ function GestionProductosPage() {
       type: 'confirm',
       title: `${accion === 'activar' ? 'Activar' : 'Suspender'} Producto`,
       message: `¿Estás seguro de ${accion} el producto "${producto.titulo}"?${accion === 'suspender' ? '\n\nEsta acción ocultará el producto de la plataforma.' : ''}`,
-      onConfirm: () => {
-        setProductos(prev =>
-          prev.map(p => p.id === producto.id ? { ...p, estado: nuevoEstado, fecha_suspension: nuevoEstado === 'suspendido' ? new Date().toISOString() : null } : p)
-        );
-        setModalData({
-          isOpen: true,
-          type: 'success',
-          title: 'Producto Actualizado',
-          message: `El producto ha sido ${accion === 'activar' ? 'activado' : 'suspendido'} correctamente`,
-          confirmText: 'Entendido'
-        });
+      onConfirm: async () => {
+        try {
+          // Sincronizar con backend usando moderación (block/active)
+          const targetModeration = nuevoEstado === 'suspendido' ? 'block' : 'active';
+          await productAPI.updateModerationStatus(producto.id, targetModeration);
+          setProductos(prev =>
+            prev.map(p => p.id === producto.id ? {
+              ...p,
+              estado: nuevoEstado,
+              moderationStatus: targetModeration,
+              fecha_suspension: nuevoEstado === 'suspendido' ? new Date().toISOString() : null
+            } : p)
+          );
+          setModalData({
+            isOpen: true,
+            type: 'success',
+            title: 'Producto Actualizado',
+            message: `El producto ha sido ${accion === 'activar' ? 'activado' : 'suspendido'} correctamente`,
+            confirmText: 'Entendido'
+          });
+        } catch {
+          setModalData({
+            isOpen: true,
+            type: 'error',
+            title: 'Error',
+            message: 'No se pudo actualizar el estado del producto',
+            confirmText: 'Cerrar'
+          });
+        }
       },
       confirmText: accion === 'activar' ? 'Activar' : 'Suspender',
       cancelText: 'Cancelar'
@@ -126,23 +158,35 @@ function GestionProductosPage() {
       type: 'warning',
       title: 'Reportar',
       message: `¿Estás seguro de reportar "${producto.titulo}"?\n\nEsto:\n- Suspenderá automáticamente el producto\n- Lo ocultará de todos los usuarios\n- Notificará al vendedor\n- Permitirá una apelación`,
-      onConfirm: () => {
-        setProductos(prev =>
-          prev.map(p => p.id === producto.id ? {
-            ...p,
-            es_peligroso: true,
-            estado: 'suspendido',
-            fecha_suspension: new Date().toISOString(),
-            razon_suspension: 'Detectado como producto potencialmente peligroso'
-          } : p)
-        );
-        setModalData({
-          isOpen: true,
-          type: 'success',
-          title: 'Producto Marcado',
-          message: 'El producto ha sido marcado como peligroso y suspendido automáticamente. El vendedor ha sido notificado.',
-          confirmText: 'Entendido'
-        });
+      onConfirm: async () => {
+        try {
+          await productAPI.updateModerationStatus(producto.id, 'block');
+          setProductos(prev =>
+            prev.map(p => p.id === producto.id ? {
+              ...p,
+              es_peligroso: true,
+              estado: 'suspendido',
+              moderationStatus: 'block',
+              fecha_suspension: new Date().toISOString(),
+              razon_suspension: 'Detectado como producto potencialmente peligroso'
+            } : p)
+          );
+          setModalData({
+            isOpen: true,
+            type: 'success',
+            title: 'Producto Marcado',
+            message: 'El producto ha sido marcado como peligroso y suspendido automáticamente. El vendedor ha sido notificado.',
+            confirmText: 'Entendido'
+          });
+        } catch {
+          setModalData({
+            isOpen: true,
+            type: 'error',
+            title: 'Error',
+            message: 'No se pudo marcar el producto como peligroso',
+            confirmText: 'Cerrar'
+          });
+        }
       },
       confirmText: 'Reportar',
       cancelText: 'Cancelar'
@@ -156,23 +200,35 @@ function GestionProductosPage() {
       type: 'confirm',
       title: 'Revertir Marca de Peligroso',
       message: `¿Estás seguro de que "${producto.titulo}" no es un producto peligroso?\n\nSe reactivará el producto automáticamente.`,
-      onConfirm: () => {
-        setProductos(prev =>
-          prev.map(p => p.id === producto.id ? {
-            ...p,
-            es_peligroso: false,
-            estado: 'activo',
-            razon_suspension: null,
-            fecha_suspension: null
-          } : p)
-        );
-        setModalData({
-          isOpen: true,
-          type: 'success',
-          title: 'Marca Revertida',
-          message: 'El producto ha sido reactivado y está disponible nuevamente en la plataforma.',
-          confirmText: 'Entendido'
-        });
+      onConfirm: async () => {
+        try {
+          await productAPI.updateModerationStatus(producto.id, 'active');
+          setProductos(prev =>
+            prev.map(p => p.id === producto.id ? {
+              ...p,
+              es_peligroso: false,
+              estado: 'activo',
+              moderationStatus: 'active',
+              razon_suspension: null,
+              fecha_suspension: null
+            } : p)
+          );
+          setModalData({
+            isOpen: true,
+            type: 'success',
+            title: 'Marca Revertida',
+            message: 'El producto ha sido reactivado y está disponible nuevamente en la plataforma.',
+            confirmText: 'Entendido'
+          });
+        } catch {
+          setModalData({
+            isOpen: true,
+            type: 'error',
+            title: 'Error',
+            message: 'No se pudo reactivar el producto',
+            confirmText: 'Cerrar'
+          });
+        }
       },
       confirmText: 'Revertir',
       cancelText: 'Cancelar'
@@ -223,7 +279,7 @@ function GestionProductosPage() {
 
         {/* Filtros */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-6">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+          <div className="grid grid-cols-1 md:grid-cols-6 gap-4 mb-6">
             {/* Búsqueda */}
             <div className="md:col-span-2">
               <label className="block text-sm font-semibold text-gray-700 mb-2">Buscar</label>
@@ -268,10 +324,38 @@ function GestionProductosPage() {
                 <option value="servicio">Servicios</option>
               </select>
             </div>
+            {/* Moderación */}
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-2">Moderación</label>
+              <select
+                value={filterModeracion}
+                onChange={(e) => setFilterModeracion(e.target.value)}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+              >
+                <option value="todos">Todos</option>
+                <option value="active">Activos</option>
+                <option value="review">En revisión</option>
+                <option value="block">Bloqueados</option>
+              </select>
+            </div>
+            {/* Origen */}
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-2">Origen</label>
+              <select
+                value={filterOrigen}
+                onChange={(e) => setFilterOrigen(e.target.value)}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+              >
+                <option value="todos">Todos</option>
+                <option value="incidencia">Incidencia</option>
+                <option value="reporte">Reporte</option>
+                <option value="ninguno">Sin alerta</option>
+              </select>
+            </div>
           </div>
 
           {/* Estadísticas rápidas */}
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-3 pt-6 border-t border-gray-200">
+          <div className="grid grid-cols-2 md:grid-cols-7 gap-3 pt-6 border-t border-gray-200">
             <div className="bg-blue-50 rounded-lg p-3 text-center border border-blue-200">
               <p className="text-lg font-bold text-blue-600">{productos.length}</p>
               <p className="text-xs text-blue-700 font-semibold">Total</p>
@@ -291,6 +375,14 @@ function GestionProductosPage() {
             <div className="bg-purple-50 rounded-lg p-3 text-center border border-purple-200">
               <p className="text-lg font-bold text-purple-600">{productos.filter(p => p.reportes > 0).length}</p>
               <p className="text-xs text-purple-700 font-semibold">Reportados</p>
+            </div>
+            <div className="bg-orange-50 rounded-lg p-3 text-center border border-orange-200">
+              <p className="text-lg font-bold text-orange-600">{productos.filter(p => p.moderationStatus === 'review').length}</p>
+              <p className="text-xs text-orange-700 font-semibold">En revisión</p>
+            </div>
+            <div className="bg-black/5 rounded-lg p-3 text-center border border-gray-300">
+              <p className="text-lg font-bold text-gray-800">{productos.filter(p => p.moderationStatus === 'block').length}</p>
+              <p className="text-xs text-gray-700 font-semibold">Bloqueados</p>
             </div>
           </div>
         </div>
@@ -343,6 +435,15 @@ function GestionProductosPage() {
                           {producto.estado === 'pendiente' && <FiClock />}
                           {producto.estado === 'suspendido' && <MdBlock />}
                           {producto.estado.toUpperCase()}
+                        </span>
+                        <span className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold border ${
+                          producto.moderationStatus === 'active' ? 'bg-green-50 text-green-700 border-green-300' :
+                          producto.moderationStatus === 'review' ? 'bg-orange-50 text-orange-700 border-orange-300' :
+                          'bg-red-50 text-red-700 border-red-300'
+                        }`}>
+                          {producto.moderationStatus === 'active' && '✔ Activo'}
+                          {producto.moderationStatus === 'review' && '⏳ Revisión'}
+                          {producto.moderationStatus === 'block' && '⛔ Bloqueado'}
                         </span>
                         <span className="text-xs bg-gray-100 text-gray-800 px-3 py-1 rounded-full font-semibold">
                           {producto.tipo === 'producto' ? '📦 Producto' : '🔧 Servicio'}
@@ -438,7 +539,7 @@ function GestionProductosPage() {
                         >
                           <FiEye /> Ver producto
                         </button>
-                        {producto.estado === 'activo' && (
+                        {producto.estado === 'activo' && producto.moderationStatus !== 'block' && (
                           <button
                             onClick={() => cambiarEstadoProducto(producto, 'suspendido')}
                             className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white font-semibold rounded-lg transition"
@@ -447,7 +548,7 @@ function GestionProductosPage() {
                             Suspender
                           </button>
                         )}
-                        {producto.estado === 'suspendido' && !producto.es_peligroso && (
+                        {producto.estado === 'suspendido' && !producto.es_peligroso && producto.moderationStatus !== 'block' && (
                           <button
                             onClick={() => cambiarEstadoProducto(producto, 'activo')}
                             className="px-4 py-2 bg-green-500 hover:bg-green-600 text-white font-semibold rounded-lg transition"
@@ -455,6 +556,11 @@ function GestionProductosPage() {
                             <FiCheck className="inline mr-2" />
                             Activar
                           </button>
+                        )}
+                        {producto.moderationStatus === 'block' && (
+                          <div className="px-4 py-2 bg-red-100 text-red-700 font-semibold rounded-lg border border-red-300">
+                            Producto bloqueado por moderación
+                          </div>
                         )}
                         {!producto.es_peligroso && producto.estado !== 'suspendido' && (
                           <button

@@ -264,6 +264,12 @@ export const productAPI = {
     return response.data;
   },
 
+  // Lista de productos con estado de moderación (active/review/block)
+  getModerationList: async () => {
+    const response = await api.get('/products/moderation');
+    return response.data;
+  },
+
   getById: async (id) => {
     const response = await api.get(`/products/${id}`);
     return response.data;
@@ -363,6 +369,13 @@ export const productAPI = {
 
   deleteProduct: async (productId) => {
     const response = await api.delete(`/products/${productId}`);
+    return response.data;
+  },
+
+  // Actualiza el estado de moderación del producto
+  updateModerationStatus: async (productId, moderationStatus) => {
+    const payload = { moderationStatus };
+    const response = await api.put(`/products/${productId}/moderation`, payload);
     return response.data;
   }
 };
@@ -570,6 +583,55 @@ export const favoriteAPI = {
       }
       return false;
     }
+  }
+};
+
+// ====== API de Incidencias ======
+export const incidenceAPI = {
+  getAll: async () => {
+    const response = await api.get('/incidences');
+    return response.data;
+  },
+  getById: async (id) => {
+    const response = await api.get(`/incidences/${id}`);
+    return response.data;
+  },
+  update: async (id, data) => {
+    const response = await api.put(`/incidences/${id}`, data);
+    return response.data;
+  },
+  remove: async (id) => {
+    const response = await api.delete(`/incidences/${id}`);
+    return response.data;
+  }
+};
+
+// ====== API de Reportes ======
+export const reportAPI = {
+  getAll: async () => {
+    const response = await api.get('/reports');
+    return response.data;
+  },
+  getById: async (id) => {
+    const response = await api.get(`/reports/${id}`);
+    return response.data;
+  },
+  remove: async (id) => {
+    const response = await api.delete(`/reports/${id}`);
+    return response.data;
+  },
+  create: async ({ typeReport, description, userId, productId, dateReport }) => {
+    const payload = {
+      // El backend acepta estos campos según ejemplo dado
+      dateReport: dateReport || new Date().toISOString(),
+      type: typeReport, // algunos backends pueden usar 'type'
+      typeReport,       // y otros 'typeReport'
+      description,
+      userId,
+      productId
+    };
+    const response = await api.post('/reports', payload);
+    return response.data;
   }
 };
 
