@@ -16,14 +16,18 @@ import {
   userAPI, 
   conversationAPI, 
   authAPI, 
-  favoriteAPI, 
-  API_BASE_URL 
+  favoriteAPI,
+  API_BASE_URL
 } from '../services/api';
+import { normalizeRole, ROLES } from '../config/roles';
+import ReportProductModal from '../components/ReportProductModal';
 
 // Componente para mostrar detalles del producto con funcionalidad de favoritos
 function ProductoDetallePage() {
   // Estado para modal de compartir
   const [shareModal, setShareModal] = useState(false);
+  // Estado para modal de reportar producto (no usado actualmente)
+  const [_reportModalOpen, _setReportModalOpen] = useState(false);
   // Función para copiar la URL al portapapeles y mostrar modal
   const handleShare = async () => {
     try {
@@ -437,6 +441,35 @@ function ProductoDetallePage() {
                     const isAuthenticated = authAPI.isAuthenticated();
                     const isOwnProduct = isAuthenticated && currentUser?.id === product?.sellerId;
 
+                    // Extraer y normalizar el rol del usuario autenticado (puede venir como string u objeto)
+                    const extractRoleFromUser = (user) => {
+                      if (!user) return null;
+                      try {
+                        if (user.roles && Array.isArray(user.roles) && user.roles.length > 0) {
+                          const r = user.roles[0];
+                          if (typeof r === 'string') return normalizeRole(r);
+                          if (r && typeof r === 'object') return normalizeRole(r.roleName || r.role || r.name || '');
+                        }
+
+                        // Intentar leer desde el token como fallback
+                        if (authAPI.isAuthenticated()) {
+                          const token = document.cookie.match(/authToken=([^;]+)/)?.[1];
+                          if (token) {
+                            const payload = JSON.parse(atob(token.split('.')[1]));
+                            const pr = payload.roles?.[0];
+                            if (typeof pr === 'string') return normalizeRole(pr);
+                            if (pr && typeof pr === 'object') return normalizeRole(pr.roleName || pr.role || pr.name || '');
+                          }
+                        }
+                      } catch {
+                        // ignore
+                      }
+
+                      return normalizeRole(user.role || null);
+                    };
+
+                    const currentUserRole = isAuthenticated ? extractRoleFromUser(currentUser) : null;
+
                     // Si el usuario está autenticado y es el propietario
                     if (isOwnProduct) {
                       return (
@@ -458,6 +491,15 @@ function ProductoDetallePage() {
                           <FiMessageCircle className="text-xl" />
                           Iniciar sesión para contactar
                         </button>
+                      );
+                    }
+
+                    // Si el usuario está autenticado y pertenece a rol Admin o Moderador, no puede comprar/contactar
+                    if (currentUserRole === ROLES.ADMIN || currentUserRole === ROLES.MODERADOR) {
+                      return (
+                        <div className="w-full py-4 bg-gray-100 text-gray-500 font-bold rounded-xl flex items-center justify-center gap-2 border-2 border-dashed border-gray-300">
+                          {`No Autorizado para contactar`}
+                        </div>
                       );
                     }
 
@@ -528,7 +570,7 @@ function ProductoDetallePage() {
                     <div className="w-12 h-12 rounded-full bg-gradient-to-br from-orange-400 to-orange-600 flex items-center justify-center text-white font-bold overflow-hidden">
                       {product.seller.avatar ? (
                         <img 
-                          src={product.seller.avatar} 
+                          src={product.seller.avatar}
                           alt={product.seller.name}
                           className="w-full h-full object-cover rounded-full"
                           onError={(e) => {

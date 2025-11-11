@@ -117,6 +117,12 @@ export const authAPI = {
     });
     return response.data;
   },
+  
+  // Solicitar recuperación de contraseña
+  requestPasswordReset: async (email) => {
+    const response = await api.post('/users/request-password-reset', { email });
+    return response.data;
+  },
 
   register: async (formData) => {
     const response = await api.post('/users/register', formData, {
@@ -370,6 +376,11 @@ export const categoryAPI = {
 
   getMain: async () => {
     const response = await api.get('/categories/main');
+    return response.data;
+  },
+
+  getById: async (id) => {
+    const response = await api.get(`/categories/${id}`);
     return response.data;
   }
 };
