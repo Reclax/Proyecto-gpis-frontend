@@ -469,6 +469,15 @@ export const messageAPI = {
   }
 };
 
+// API para Calificaciones de vendedores
+export const ratingAPI = {
+  // Crear o actualizar calificación de un vendedor
+  rateSeller: async (sellerId, { score, comment }) => {
+    const response = await api.post(`/ratings/${sellerId}`, { score, comment });
+    return response.data;
+  }
+};
+
 // ====== API de Favoritos ======
 // Cache para evitar múltiples llamadas
 let favoritesCache = null;
