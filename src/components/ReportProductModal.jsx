@@ -75,10 +75,10 @@ function ReportProductModal({ isOpen, onClose, productId, productTitle }) {
     setLoading(true);
     try {
       const payload = {
-        typeReport: reportData.tipo_reporte,
+        type: reportData.tipo_reporte,
         description: reportData.comentario,
         userId,
-        productId,
+        productId: Number(productId),
         dateReport: new Date().toISOString()
       };
 

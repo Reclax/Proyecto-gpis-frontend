@@ -40,8 +40,8 @@ function GestionProductosPage() {
     // Cargar productos desde el API
     const load = async () => {
       try {
-        // Usar endpoint de moderación para incluir moderationStatus
-        const data = await productAPI.getModerationList().catch(async () => {
+        // Usar endpoint de moderación para incluir todos los productos sin filtros (solo admins)
+        const data = await productAPI.getAllModeration().catch(async () => {
           // Fallback si endpoint no disponible
           return await productAPI.getAll();
         });
