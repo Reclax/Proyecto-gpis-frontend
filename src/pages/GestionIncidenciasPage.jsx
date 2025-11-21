@@ -10,7 +10,8 @@ import {
   FiUserCheck,
   FiUsers,
   FiEye,
-  FiLayers
+  FiLayers,
+  FiExternalLink
 } from "react-icons/fi";
 import { MdBlock, MdVerified } from "react-icons/md";
 import { useNavigate } from "react-router-dom";
@@ -132,20 +133,38 @@ const buildProductInfo = (source, productMap = {}) => {
   };
 };
 
-const normalizeAppeal = (appeal) => {
+const normalizeAppeal = (appeal, incidencesList = []) => {
   const incidenceId = parseNumericId(
     appeal.incidenceId ||
       appeal.incidenciaId ||
       appeal.incidence?.id ||
       appeal.incidencia?.id
   );
+  
+  // Buscar la incidencia relacionada para derivar el estado
+  const relatedIncidence = incidencesList.find(inc => 
+    parseNumericId(inc.id || inc.incidenceId) === incidenceId
+  );
+  
+  // Derivar estado desde el productModerationStatus de la incidencia:
+  // - Si el producto está en review/flagged -> apelación "pendiente"
+  // - Si el producto está active/block/suspended/rejected -> apelación "resuelta"
+  let estado = "pendiente";
+  if (relatedIncidence) {
+    const modStatus = relatedIncidence.productModerationStatus || relatedIncidence.product?.moderationStatus;
+    if (["active", "block", "suspended", "rejected"].includes(modStatus)) {
+      estado = "resuelta";
+    }
+  }
+  
   return {
     id: appeal.id,
     incidenceId,
-    estado: appeal.estado || appeal.status || "pendiente",
-    motivo: appeal.motivo || appeal.reason || appeal.descripcion || "",
+    estado,
+    motivo: appeal.motivo || appeal.reason || appeal.description || appeal.descripcion || appeal.message || "",
     createdAt:
       appeal.createdAt ||
+      appeal.dateAppeals ||
       appeal.fecha_apelacion ||
       appeal.fechaCreacion ||
       new Date().toISOString(),
@@ -411,14 +430,15 @@ function GestionIncidenciasPage() {
         appealAPI.getAll().catch(() => []),
       ]);
 
-      const normalizedAppeals = (Array.isArray(appealsData) ? appealsData : []).map(normalizeAppeal);
+      // Primero necesitamos las incidencias raw para normalizar appeals
+      const rawIncidences = Array.isArray(incidencesData) ? incidencesData : [];
 
       // Primero normalizar reportes sin producto (temporal), luego cargar productos y volver a normalizar
       const provisionalReports = (Array.isArray(reportsData) ? reportsData : []).map((r) =>
         normalizeReport(r, {})
       );
-      const provisionalIncidences = (Array.isArray(incidencesData) ? incidencesData : []).map(
-        (i) => normalizeIncidence(i, normalizedAppeals, provisionalReports, userMap, {})
+      const provisionalIncidences = rawIncidences.map(
+        (i) => normalizeIncidence(i, [], provisionalReports, userMap, {})
       );
 
       const productMapActual = await loadProductsMap(provisionalReports, provisionalIncidences);
@@ -426,13 +446,25 @@ function GestionIncidenciasPage() {
       const finalReports = (Array.isArray(reportsData) ? reportsData : []).map((r) =>
         normalizeReport(r, productMapActual)
       );
-      const finalIncidences = (Array.isArray(incidencesData) ? incidencesData : []).map((i) =>
+      
+      // Normalizar incidencias finales con productMap
+      const finalIncidences = rawIncidences.map((i) =>
+        normalizeIncidence(i, [], finalReports, userMap, productMapActual)
+      );
+      
+      // Ahora normalizar apelaciones con las incidencias finales
+      const normalizedAppeals = (Array.isArray(appealsData) ? appealsData : []).map(a => 
+        normalizeAppeal(a, finalIncidences)
+      );
+      
+      // Actualizar incidencias con las apelaciones normalizadas
+      const finalIncidencesWithAppeals = rawIncidences.map((i) =>
         normalizeIncidence(i, normalizedAppeals, finalReports, userMap, productMapActual)
       );
 
       setAppeals(normalizedAppeals);
       setReports(finalReports);
-      setIncidences(finalIncidences);
+      setIncidences(finalIncidencesWithAppeals);
     } catch (error) {
       console.error("Error al cargar datos:", error);
       setModalData({
@@ -474,35 +506,46 @@ function GestionIncidenciasPage() {
   }, []);
 
   const stats = useMemo(() => {
+    // Contar incidencias basadas en el productModerationStatus
     const pendingIncidences = incidences.filter(
-      (inc) => inc.estado === "pendiente"
+      (inc) => inc.productModerationStatus === "review" || inc.productModerationStatus === "flagged"
     );
     const inReviewIncidences = incidences.filter(
-      (inc) => inc.estado === "en_revision"
+      (inc) => inc.productModerationStatus === "review"
     );
     const resolvedIncidences = incidences.filter(
-      (inc) => inc.estado === "resuelto"
+      (inc) => ["active", "block", "suspended", "rejected"].includes(inc.productModerationStatus)
     );
-    const suspendedIncidences = incidences.filter(
-      (inc) => inc.estado === "suspendido"
-    );
-    const pendingAppeals = appeals.filter((ap) => ap.estado === "pendiente");
+    const pendingAppeals = appeals.filter((ap) => ap.estado === "pendiente" || ap.estado === "pending");
+    
     return {
       reportCount: reports.length,
       pendingCount: pendingIncidences.length,
       inReviewCount: inReviewIncidences.length,
       resolvedCount: resolvedIncidences.length,
-      suspendedCount: suspendedIncidences.length,
+      suspendedCount: 0, // Ya no usamos suspendido como categoría separada
       appealCount: pendingAppeals.length,
     };
   }, [reports, incidences, appeals]);
 
   const incidencesForStats = useMemo(
     () =>
-      incidences.map((inc) => ({
-        moderador_id: inc.moderadorId,
-        estado: inc.estado,
-      })),
+      incidences.map((inc) => {
+        // Mapear el estado del producto a estado de incidencia para stats
+        let estadoIncidencia = "pendiente";
+        const modStatus = inc.productModerationStatus;
+        
+        if (modStatus === "review" || modStatus === "flagged") {
+          estadoIncidencia = "en_revision"; // Activa
+        } else if (["active", "block", "suspended", "rejected"].includes(modStatus)) {
+          estadoIncidencia = "resuelto"; // Cerrada
+        }
+        
+        return {
+          moderador_id: inc.moderadorId,
+          estado: estadoIncidencia,
+        };
+      }),
     [incidences]
   );
 
@@ -517,10 +560,26 @@ function GestionIncidenciasPage() {
 
   const filteredIncidences = useMemo(() => {
     return incidences.filter((incidence) => {
-      if (selectedTab === "pendientes" && incidence.estado !== "pendiente") return false;
-      if (selectedTab === "en_revision" && incidence.estado !== "en_revision") return false;
-      if (selectedTab === "historial" && !["resuelto", "suspendido"].includes(incidence.estado)) return false;
+      const modStatus = incidence.productModerationStatus;
+      
+      // Filtrar por tab según el estado de moderación del producto
+      if (selectedTab === "pendientes") {
+        // Pendientes: productos en review o flagged (requieren atención inicial)
+        if (modStatus !== "review" && modStatus !== "flagged") return false;
+      }
+      if (selectedTab === "en_revision") {
+        // En revisión: productos siendo revisados activamente
+        if (modStatus !== "review") return false;
+      }
+      if (selectedTab === "historial") {
+        // Historial: productos con decisión final
+        if (!["active", "block", "suspended", "rejected"].includes(modStatus)) return false;
+      }
+      
+      // Filtrar por prioridad
       if (priorityFilter !== "todos" && incidence.prioridad !== priorityFilter) return false;
+      
+      // Filtrar por búsqueda
       if (searchTerm.trim() === "") return true;
       const term = searchTerm.trim().toLowerCase();
       return (
@@ -1026,10 +1085,13 @@ function GestionIncidenciasPage() {
       <div className="space-y-4">
         {list.map((incidence) => {
           const expanded = !!expandedIncidenceReports[incidence.id];
+          const pendingAppealsCount = incidence.appeals?.filter(a => a.estado === 'pendiente').length || 0;
+          
           return (
             <div
               key={incidence.id}
-              className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm"
+              id={`incidence-${incidence.id}`}
+              className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm transition-all"
             >
               <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
                 <div className="flex-1">
@@ -1058,9 +1120,10 @@ function GestionIncidenciasPage() {
                     >
                       Prioridad {incidence.prioridad}
                     </span>
-                    {incidence.hasPendingAppeal && (
-                      <span className="px-2 py-1 rounded-full bg-purple-50 text-purple-700 font-medium">
-                        Apelación pendiente
+                    {pendingAppealsCount > 0 && (
+                      <span className="px-2 py-1 rounded-full bg-purple-50 text-purple-700 font-semibold inline-flex items-center gap-1 animate-pulse">
+                        <FiAlertTriangle className="text-purple-600" />
+                        {pendingAppealsCount} Apelación{pendingAppealsCount > 1 ? 'es' : ''} pendiente{pendingAppealsCount > 1 ? 's' : ''}
                       </span>
                     )}
                     <span className="px-2 py-1 rounded-full bg-gray-100 font-medium">
@@ -1243,8 +1306,16 @@ function GestionIncidenciasPage() {
 
               {isHistory && (
                 <div className="mt-4 flex flex-wrap gap-3 text-sm text-gray-600">
-                  <span className="px-3 py-1 bg-green-50 text-green-700 rounded-full font-semibold">
-                    Estado final: {incidence.estado}
+                  <span className={`px-3 py-1 rounded-full font-semibold ${
+                    incidence.productModerationStatus === 'active' 
+                      ? 'bg-green-50 text-green-700'
+                      : incidence.productModerationStatus === 'block'
+                      ? 'bg-red-50 text-red-700'
+                      : incidence.productModerationStatus === 'suspended'
+                      ? 'bg-orange-50 text-orange-700'
+                      : 'bg-gray-50 text-gray-700'
+                  }`}>
+                    Resolución: {MODERATION_LABELS[incidence.productModerationStatus] || incidence.productModerationStatus}
                   </span>
                   {incidence.notas && (
                     <span className="px-3 py-1 bg-gray-50 rounded-full">
@@ -1272,39 +1343,119 @@ function GestionIncidenciasPage() {
     }
     return (
       <div className="space-y-4">
-        {appeals.map((appeal) => (
-          <div
-            key={appeal.id}
-            className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm"
-          >
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-              <div>
-                <p className="text-xs text-gray-500 font-semibold uppercase mb-1">
-                  Apelación #{appeal.id}
-                </p>
-                <h3 className="text-lg font-bold text-gray-900">
-                  Incidencia vinculada: {appeal.incidenceId}
-                </h3>
-                <p className="text-sm text-gray-600 mt-2">
-                  {appeal.motivo || "Sin motivo registrado."}
-                </p>
-              </div>
-              <div className="text-sm text-gray-600">
-                <p>
-                  Estado:{" "}
-                  <span className="font-semibold text-purple-700 capitalize">
-                    {appeal.estado}
-                  </span>
-                </p>
-                <p>Recibido: {formatDate(appeal.createdAt)}</p>
+        {appeals.map((appeal) => {
+          // Buscar la incidencia relacionada
+          const relatedIncidence = incidences.find(inc => inc.id === appeal.incidenceId);
+          const productTitle = relatedIncidence?.productTitle || `Producto #${relatedIncidence?.productId || 'desconocido'}`;
+          const productPhoto = relatedIncidence?.productPhoto;
+          
+          return (
+            <div
+              key={appeal.id}
+              className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm hover:shadow-md transition-shadow"
+            >
+              <div className="flex flex-col lg:flex-row gap-6">
+                {/* Foto del producto si existe */}
+                {productPhoto && (
+                  <div className="w-full lg:w-24 h-24 bg-gray-100 rounded-xl overflow-hidden flex-shrink-0">
+                    <img 
+                      src={productPhoto.startsWith('http') ? productPhoto : `${import.meta.env.VITE_API_URL || 'http://localhost:8080'}${productPhoto}`}
+                      alt={productTitle}
+                      className="w-full h-full object-cover"
+                      onError={(e) => {
+                        e.target.style.display = 'none';
+                      }}
+                    />
+                  </div>
+                )}
+                
+                <div className="flex-1">
+                  <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-4">
+                    <div>
+                      <div className="flex items-center gap-2 mb-2">
+                        <p className="text-xs text-gray-500 font-semibold uppercase">
+                          Apelación #{appeal.id}
+                        </p>
+                        <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                          appeal.estado === 'pendiente' 
+                            ? 'bg-yellow-100 text-yellow-700' 
+                            : 'bg-green-100 text-green-700'
+                        }`}>
+                          {appeal.estado === 'pendiente' ? 'Pendiente' : 'Resuelta'}
+                        </span>
+                        {relatedIncidence && (
+                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                            relatedIncidence.productModerationStatus === 'active'
+                              ? 'bg-green-50 text-green-600'
+                              : relatedIncidence.productModerationStatus === 'block'
+                              ? 'bg-red-50 text-red-600'
+                              : relatedIncidence.productModerationStatus === 'review'
+                              ? 'bg-orange-50 text-orange-600'
+                              : 'bg-gray-50 text-gray-600'
+                          }`}>
+                            {MODERATION_LABELS[relatedIncidence.productModerationStatus] || relatedIncidence.productModerationStatus}
+                          </span>
+                        )}
+                      </div>
+                      <h3 className="text-lg font-bold text-gray-900 mb-1">
+                        {productTitle}
+                      </h3>
+                      <p className="text-sm text-gray-500 mb-3">
+                        Incidencia #{appeal.incidenceId} • {formatDate(appeal.createdAt)}
+                      </p>
+                      <div className="bg-gray-50 rounded-lg p-3 border border-gray-200">
+                        <p className="text-sm font-semibold text-gray-700 mb-1">Motivo de la apelación:</p>
+                        <p className="text-sm text-gray-600">
+                          {appeal.motivo || "Sin motivo registrado."}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Botón para ir a la incidencia */}
+                  <div className="flex gap-3 mt-4">
+                    <button
+                      onClick={() => {
+                        // Determinar el tab correcto según el productModerationStatus
+                        let targetTab = 'pendientes';
+                        if (relatedIncidence) {
+                          const modStatus = relatedIncidence.productModerationStatus;
+                          if (modStatus === 'review' || modStatus === 'flagged') {
+                            targetTab = 'en_revision';
+                          } else if (['active', 'block', 'suspended', 'rejected'].includes(modStatus)) {
+                            targetTab = 'historial';
+                          }
+                        }
+                        
+                        console.log('Navegando a incidencia:', appeal.incidenceId, 'Tab:', targetTab, 'ModStatus:', relatedIncidence?.productModerationStatus);
+                        setSelectedTab(targetTab);
+                        
+                        // Scroll suave hacia la incidencia después de cambiar de tab
+                        setTimeout(() => {
+                          const element = document.getElementById(`incidence-${appeal.incidenceId}`);
+                          console.log('Elemento encontrado:', element);
+                          if (element) {
+                            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            element.classList.add('ring-4', 'ring-purple-300');
+                            setTimeout(() => {
+                              element.classList.remove('ring-4', 'ring-purple-300');
+                            }, 2000);
+                          } else {
+                            console.warn('No se encontró el elemento con ID:', `incidence-${appeal.incidenceId}`);
+                          }
+                        }, 300);
+                      }}
+                      className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors flex items-center gap-2 font-semibold text-sm"
+                    >
+                      <FiExternalLink className="text-lg" />
+                      Ver incidencia relacionada
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
-            <p className="text-sm text-gray-500 mt-4">
-              Dirígete a la incidencia vinculada para tomar una decisión. Las
-              apelaciones no se resuelven de forma independiente.
-            </p>
-          </div>
-        ))}
+          );
+        })}
       </div>
     );
   };
@@ -1322,22 +1473,13 @@ function GestionIncidenciasPage() {
       case "reportes":
         return renderReportGroups();
       case "pendientes":
-        return renderIncidenceList(
-          filteredIncidences.filter((inc) => inc.estado === "pendiente")
-        );
+        return renderIncidenceList(filteredIncidences);
       case "en_revision":
-        return renderIncidenceList(
-          filteredIncidences.filter((inc) => inc.estado === "en_revision")
-        );
+        return renderIncidenceList(filteredIncidences);
       case "apelaciones":
         return renderAppeals();
       case "historial":
-        return renderIncidenceList(
-          filteredIncidences.filter(
-            (inc) => inc.estado === "resuelto" || inc.estado === "suspendido"
-          ),
-          true
-        );
+        return renderIncidenceList(filteredIncidences, true);
       default:
         return null;
     }

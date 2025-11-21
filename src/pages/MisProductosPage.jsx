@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
-import { authAPI, productAPI, categoryAPI, API_BASE_URL } from '../services/api';
+import { authAPI, productAPI, categoryAPI, incidenceAPI, appealAPI, userAPI, API_BASE_URL } from '../services/api';
 import { useNavigate, Link } from 'react-router-dom';
-import { FiEye, FiEdit, FiTrash2, FiPlus, FiAlertCircle, FiX, FiSave, FiUpload, FiDollarSign, FiMapPin, FiTag } from 'react-icons/fi';
+import { FiEye, FiEdit, FiTrash2, FiPlus, FiAlertCircle, FiX, FiSave, FiUpload, FiDollarSign, FiMapPin, FiTag, FiFileText } from 'react-icons/fi';
 import { HiDevicePhoneMobile, HiShoppingBag, HiHomeModern, HiTrophy, HiTruck } from 'react-icons/hi2';
 import { IoGameController } from 'react-icons/io5';
   // Mapeo de íconos para categorías principales (igual que en VenderPage)
@@ -22,6 +22,8 @@ function MisProductosPage() {
   const [notification, setNotification] = useState({ show: false, type: '', message: '' });
   const [editModal, setEditModal] = useState({ show: false, product: null });
   const [editLoading, setEditLoading] = useState(false);
+  const [appealModal, setAppealModal] = useState({ show: false, product: null, incidenceId: null });
+  const [appealLoading, setAppealLoading] = useState(false);
   const [sortOrder, setSortOrder] = useState('default'); // 'default', 'asc', 'desc'
   const [currentPage, setCurrentPage] = useState(1);
   const PRODUCTS_PER_PAGE = 6;
@@ -49,6 +51,8 @@ function MisProductosPage() {
                  product.status === 'sold' ? 'Vendido' : 
                  product.status === 'reserved' ? 'Reservado' : 'Inactivo',
           moderationStatus: product.moderationStatus || 'active',
+          incidenceId: product.incidenceId || null,
+          appealStatus: product.appealStatus || null,
           visitas: 0,
           imagen: product.ProductPhotos && product.ProductPhotos.length > 0 
             ? (product.ProductPhotos[0].url.startsWith('http') 
@@ -105,6 +109,8 @@ function MisProductosPage() {
                  product.status === 'sold' ? 'Vendido' : 
                  product.status === 'reserved' ? 'Reservado' : 'Inactivo',
           moderationStatus: product.moderationStatus || 'active',
+          incidenceId: product.incidenceId || null,
+          appealStatus: product.appealStatus || null,
           visitas: 0,
           imagen: product.ProductPhotos && product.ProductPhotos.length > 0 
             ? (product.ProductPhotos[0].url.startsWith('http') 
@@ -240,6 +246,92 @@ function MisProductosPage() {
     setEditModal({ show: false, product: null });
   };
 
+  const handleApelar = async (producto) => {
+    try {
+      // Buscar la incidencia relacionada con este producto
+      const incidencias = await incidenceAPI.getAll();
+      const incidencia = incidencias.find(inc => inc.productId === producto.id);
+      
+      if (!incidencia) {
+        // Si no existe incidencia, crear una automáticamente
+        try {
+          // Obtener el usuario actual desde la API
+          const currentUserData = await userAPI.whoAmI();
+          
+          if (!currentUserData || !currentUserData.id) {
+            showNotification('error', 'No se pudo identificar al usuario');
+            return;
+          }
+
+          const nuevaIncidencia = await incidenceAPI.create({
+            description: `Producto bloqueado: ${producto.nombre}`,
+            userId: currentUserData.id,
+            productId: producto.id,
+            status: 'pending'
+          });
+          
+          setAppealModal({ show: true, product: producto, incidenceId: nuevaIncidencia.incidence.id });
+        } catch (createError) {
+          console.error('Error creando incidencia:', createError);
+          showNotification('error', 'Error al crear la incidencia para la apelación');
+        }
+        return;
+      }
+      
+      // Verificar si ya existe una apelación para esta incidencia
+      try {
+        const apelaciones = await appealAPI.getAll();
+        const apelacionExistente = apelaciones.find(appeal => appeal.incidenceId === incidencia.id);
+        
+        if (apelacionExistente) {
+          showNotification('warning', 'Ya has enviado una apelación para este producto. Por favor espera la revisión del moderador.');
+          return;
+        }
+      } catch (appealError) {
+        console.error('Error verificando apelaciones:', appealError);
+        showNotification('error', 'Error al verificar apelaciones existentes');
+        return;
+      }
+      
+      setAppealModal({ show: true, product: producto, incidenceId: incidencia.id });
+    } catch (error) {
+      console.error('Error buscando incidencia:', error);
+      showNotification('error', 'Error al cargar la información de la incidencia');
+    }
+  };
+
+  const handleSubmitAppeal = async (appealData) => {
+    try {
+      setAppealLoading(true);
+      await appealAPI.create({
+        incidenceId: appealModal.incidenceId,
+        message: appealData.mensaje
+      });
+      
+      // Actualizar el estado local del producto para reflejar la apelación pendiente
+      setProductos(prev => prev.map(p => 
+        p.id === appealModal.product.id 
+          ? { ...p, appealStatus: 'pending' }
+          : p
+      ));
+      
+      setAppealModal({ show: false, product: null, incidenceId: null });
+      showNotification('success', 'Apelación enviada exitosamente. Será revisada por un moderador.');
+      
+      // Recargar productos para actualizar el estado desde el servidor
+      await reloadProducts();
+    } catch (error) {
+      console.error('Error enviando apelación:', error);
+      showNotification('error', error.response?.data?.message || 'Error al enviar la apelación');
+    } finally {
+      setAppealLoading(false);
+    }
+  };
+
+  const handleCloseAppeal = () => {
+    setAppealModal({ show: false, product: null, incidenceId: null });
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 py-8">
@@ -350,6 +442,19 @@ function MisProductosPage() {
                               {producto.moderationStatus === 'review' ? 'En revisión' : 'Bloqueado'}
                             </span>
                           )}
+                          {producto.appealStatus && (
+                            <span className={`px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap ${
+                              producto.appealStatus === 'pending'
+                                ? 'bg-blue-100 text-blue-700'
+                                : producto.appealStatus === 'approved'
+                                ? 'bg-green-100 text-green-700'
+                                : 'bg-gray-100 text-gray-700'
+                            }`}>
+                              {producto.appealStatus === 'pending' ? 'Apelación pendiente' : 
+                               producto.appealStatus === 'approved' ? 'Apelación aprobada' : 
+                               'Apelación rechazada'}
+                            </span>
+                          )}
                         </div>
                       </div>
 
@@ -369,6 +474,15 @@ function MisProductosPage() {
                           >
                             <FiEdit />
                             Editar
+                          </button>
+                        )}
+                        {producto.moderationStatus === 'block' && !producto.appealStatus && (
+                          <button
+                            onClick={() => handleApelar(producto)}
+                            className="px-5 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors flex items-center gap-2 font-semibold"
+                          >
+                            <FiFileText />
+                            Apelar bloqueo
                           </button>
                         )}
                         <button
@@ -441,6 +555,16 @@ function MisProductosPage() {
           onSave={handleSaveEdit}
           onClose={handleCloseEdit}
           loading={editLoading}
+        />
+      )}
+
+      {/* Modal de Apelación */}
+      {appealModal.show && (
+        <AppealModal 
+          product={appealModal.product}
+          onSubmit={handleSubmitAppeal}
+          onClose={handleCloseAppeal}
+          loading={appealLoading}
         />
       )}
 
@@ -935,6 +1059,137 @@ function MisProductosPage() {
           />
         )}
       </>
+    );
+  }
+
+  // Componente Modal de Apelación
+  function AppealModal({ product, onSubmit, onClose, loading }) {
+    const [mensaje, setMensaje] = useState('');
+    const [error, setError] = useState('');
+
+    const handleSubmit = (e) => {
+      e.preventDefault();
+      
+      if (!mensaje.trim()) {
+        setError('Por favor, explica por qué consideras que el bloqueo es injusto');
+        return;
+      }
+
+      if (mensaje.trim().length < 20) {
+        setError('El mensaje debe tener al menos 20 caracteres');
+        return;
+      }
+
+      onSubmit({ mensaje: mensaje.trim() });
+    };
+
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        {/* Backdrop */}
+        <div 
+          className="absolute inset-0 backdrop-blur-sm bg-black/20"
+          onClick={onClose}
+        ></div>
+        
+        {/* Modal Content */}
+        <div className="relative bg-white rounded-3xl shadow-2xl max-w-2xl w-full">
+          {/* Header */}
+          <div className="flex items-center justify-between p-6 border-b border-gray-200">
+            <div>
+              <h2 className="text-2xl font-bold text-gray-900">Apelar Bloqueo</h2>
+              <p className="text-sm text-gray-600 mt-1">Producto: {product.nombre}</p>
+            </div>
+            <button
+              onClick={onClose}
+              className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+            >
+              <FiX className="text-xl text-gray-500" />
+            </button>
+          </div>
+
+          {/* Form */}
+          <form onSubmit={handleSubmit} className="p-6">
+            {/* Información */}
+            <div className="bg-blue-50 border-l-4 border-blue-500 p-4 mb-6 rounded">
+              <div className="flex items-start">
+                <FiAlertCircle className="text-blue-500 text-xl mt-0.5 mr-3 flex-shrink-0" />
+                <div>
+                  <h3 className="font-semibold text-blue-900 mb-1">Información sobre apelaciones</h3>
+                  <p className="text-sm text-blue-800">
+                    Tu producto ha sido bloqueado por violar nuestras políticas. Si consideras que 
+                    este bloqueo es injusto, puedes presentar una apelación explicando tu situación. 
+                    Un moderador revisará tu caso.
+                  </p>
+                  <p className="text-sm text-blue-900 font-semibold mt-2">
+                    ⚠️ Solo puedes enviar UNA apelación por producto. Asegúrate de explicar claramente tu caso.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Campo de mensaje */}
+            <div className="mb-6">
+              <label className="block text-lg font-bold text-gray-900 mb-2">
+                Explica tu situación *
+              </label>
+              <textarea
+                value={mensaje}
+                onChange={(e) => {
+                  setMensaje(e.target.value);
+                  setError('');
+                }}
+                rows="6"
+                className={`w-full px-4 py-3 border-2 rounded-xl focus:outline-none transition-colors resize-none ${
+                  error ? 'border-red-500 focus:border-red-500' : 'border-gray-300 focus:border-purple-500'
+                }`}
+                placeholder="Explica detalladamente por qué consideras que el bloqueo de tu producto es injusto. Incluye toda la información relevante que pueda ayudar al moderador a entender tu caso..."
+              />
+              {error && (
+                <p className="text-red-600 text-sm mt-2 flex items-center gap-1">
+                  <FiAlertCircle />
+                  {error}
+                </p>
+              )}
+              <p className="text-gray-500 text-sm mt-2">
+                Mínimo 20 caracteres ({mensaje.length}/20)
+              </p>
+            </div>
+
+            {/* Advertencia */}
+            <div className="bg-yellow-50 border-l-4 border-yellow-500 p-4 mb-6 rounded">
+              <div className="flex items-start">
+                <FiAlertCircle className="text-yellow-600 text-xl mt-0.5 mr-3 flex-shrink-0" />
+                <p className="text-sm text-yellow-800">
+                  <strong>Importante:</strong> Las apelaciones falsas o que no cumplan con nuestras 
+                  políticas pueden resultar en sanciones adicionales. Sé honesto y específico en tu explicación.
+                </p>
+              </div>
+            </div>
+
+            {/* Botones */}
+            <div className="flex gap-4 pt-4 border-t border-gray-200">
+              <button
+                type="button"
+                onClick={onClose}
+                disabled={loading}
+                className="flex-1 px-6 py-3 border-2 border-gray-300 text-gray-700 rounded-xl font-bold hover:bg-gray-50 transition-colors disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                disabled={loading}
+                className={`flex-1 px-6 py-3 bg-purple-600 text-white rounded-xl font-bold transition-opacity shadow-lg flex items-center justify-center gap-2 ${
+                  loading ? 'opacity-50 cursor-not-allowed' : 'hover:bg-purple-700'
+                }`}
+              >
+                <FiFileText />
+                {loading ? 'Enviando...' : 'Enviar Apelación'}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
     );
   }
 }
