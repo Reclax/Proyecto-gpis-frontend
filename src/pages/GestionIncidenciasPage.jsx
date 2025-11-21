@@ -1,781 +1,1241 @@
-
-import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { FiAlertTriangle, FiCalendar, FiFilter, FiEye, FiCheck, FiX, FiClock, FiChevronDown, FiMessageSquare, FiInfo } from 'react-icons/fi';
-import { MdBlock, MdVerified } from 'react-icons/md';
-import usePageTitle from '../hooks/usePageTitle';
-import Modal from '../components/common/Modal';
+import { useEffect, useMemo, useState } from "react";
 import {
+  FiAlertTriangle,
+  FiChevronDown,
+  FiClock,
+  FiInbox,
+  FiRefreshCw,
+  FiSearch,
+  FiTag,
+  FiUserCheck,
+  FiUsers,
+} from "react-icons/fi";
+import { MdBlock, MdVerified } from "react-icons/md";
+import { useNavigate } from "react-router-dom";
+import Modal from "../components/common/Modal";
+import {
+  LIMITES_INCIDENCIAS,
+  normalizeRole,
   obtenerEstadisticasModerador,
-  puedeTomarIncidencia,
   obtenerMensajeValidacion,
-  LIMITES_INCIDENCIAS
-} from '../config/roles';
-import { API_BASE_URL, productAPI, userAPI, incidenceAPI, reportAPI } from '../services/api';
+  puedeTomarIncidencia,
+  ROLES,
+} from "../config/roles";
+import usePageTitle from "../hooks/usePageTitle";
+import api, {
+  appealAPI,
+  authAPI,
+  incidenceAPI,
+  reportAPI,
+} from "../services/api";
+import { checkAdminAccess } from "../utils/rolePermissions";
 
-//
+const parseNumericId = (value) => {
+  if (typeof value === "number" && !Number.isNaN(value)) return value;
+  if (typeof value === "string" && value.trim() !== "") {
+    const parsed = Number(value);
+    return Number.isNaN(parsed) ? null : parsed;
+  }
+  return null;
+};
+
+const buildUserLabel = (user, fallback = "Usuario") => {
+  if (!user) return { id: null, name: fallback };
+  const id = parseNumericId(user.id || user.userId || user.usuarioId);
+  const firstName = user.name || user.nombre || user.firstName || "";
+  const lastName = user.lastname || user.apellido || user.lastName || "";
+  const username = user.username || user.email || fallback;
+  const name = `${firstName} ${lastName}`.trim() || username;
+  return { id, name };
+};
+
+const buildProductInfo = (source) => {
+  const product =
+    source?.product ||
+    source?.Product ||
+    source?.producto ||
+    source?.Producto ||
+    {};
+  const id = parseNumericId(
+    source?.productId || product.id || product.productId
+  );
+  const title =
+    product.title ||
+    product.name ||
+    source?.productTitle ||
+    `Producto #${id ?? "sin-id"}`;
+  const photo =
+    product.photos?.[0]?.url || product.mainPhoto || product.imageUrl || null;
+  const status =
+    product.status ||
+    product.moderationStatus ||
+    source?.productStatus ||
+    "desconocido";
+  return { id, title, photo, status };
+};
+
+const normalizeAppeal = (appeal) => {
+  const incidenceId = parseNumericId(
+    appeal.incidenceId ||
+      appeal.incidenciaId ||
+      appeal.incidence?.id ||
+      appeal.incidencia?.id
+  );
+  return {
+    id: appeal.id,
+    incidenceId,
+    estado: appeal.estado || appeal.status || "pendiente",
+    motivo: appeal.motivo || appeal.reason || appeal.descripcion || "",
+    createdAt:
+      appeal.createdAt ||
+      appeal.fecha_apelacion ||
+      appeal.fechaCreacion ||
+      new Date().toISOString(),
+    raw: appeal,
+  };
+};
+
+const normalizeReport = (report) => {
+  const product = buildProductInfo(report);
+  const reporter = buildUserLabel(
+    report.user || report.reporter || report.usuario || report.User
+  );
+  return {
+    id: report.id,
+    productId: product.id,
+    productTitle: product.title,
+    productPhoto: product.photo,
+    description: report.description || report.detalle || report.reason || "",
+    type: report.typeReport || report.type || "reporte_usuario",
+    status: report.status || report.estado || "pendiente",
+    reporterName: reporter.name,
+    reporterId:
+      reporter.id || parseNumericId(report.userId || report.reporterId),
+    createdAt:
+      report.dateReport ||
+      report.createdAt ||
+      report.fechaReporte ||
+      new Date().toISOString(),
+    raw: report,
+  };
+};
+
+const normalizeIncidence = (incidence, appeals = []) => {
+  const product = buildProductInfo(incidence);
+  const reporter = buildUserLabel(
+    incidence.report ||
+      incidence.reporter ||
+      incidence.usuario ||
+      incidence.User,
+    "Usuario"
+  );
+  const moderator = buildUserLabel(
+    incidence.moderador ||
+      incidence.moderator ||
+      incidence.asignadoA ||
+      incidence.assignedTo,
+    "Sin asignar"
+  );
+  const moderadorId =
+    moderator.id ??
+    parseNumericId(
+      incidence.moderadorId || incidence.moderador_id || incidence.moderatorId
+    );
+
+  const incidenceAppeals = appeals.filter(
+    (appeal) => appeal.incidenceId === parseNumericId(incidence.id)
+  );
+
+  return {
+    id: incidence.id,
+    codigo: incidence.codigo || incidence.code || `INC-${incidence.id}`,
+    estado: incidence.estado || incidence.status || "pendiente",
+    tipo: incidence.tipo || incidence.type || "reporte_usuario",
+    prioridad: incidence.prioridad || incidence.priority || "media",
+    productId: product.id,
+    productTitle: product.title,
+    productPhoto: product.photo,
+    productStatus: product.status,
+    reporterId: reporter.id,
+    reporterName: reporter.name,
+    moderadorId,
+    moderadorNombre: moderador.name === "Sin asignar" ? "" : moderator.name,
+    createdAt:
+      incidence.createdAt ||
+      incidence.fecha_incidencia ||
+      incidence.fechaCreacion ||
+      new Date().toISOString(),
+    updatedAt:
+      incidence.updatedAt ||
+      incidence.fecha_actualizacion ||
+      incidence.updatedAt,
+    notas: incidence.notas || incidence.comentarios || incidence.detalle || "",
+    appeals: incidenceAppeals,
+    hasPendingAppeal: incidenceAppeals.some(
+      (appeal) => appeal.estado === "pendiente"
+    ),
+    raw: incidence,
+  };
+};
+
+const formatDate = (value) => {
+  if (!value) return "Sin fecha";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString("es-ES", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+};
+
+const EmptyState = ({ icon: Icon, title, description }) => (
+  <div className="flex flex-col items-center justify-center py-16 text-center bg-white rounded-2xl border border-dashed border-gray-300">
+    <div className="p-4 bg-gray-100 rounded-full mb-4">
+      <Icon className="w-8 h-8 text-gray-400" />
+    </div>
+    <h3 className="text-lg font-semibold text-gray-800 mb-2">{title}</h3>
+    <p className="text-sm text-gray-500 max-w-md">{description}</p>
+  </div>
+);
+
+const TAB_OPTIONS = [
+  { id: "reportes", label: "Reportes pendientes" },
+  { id: "pendientes", label: "Incidencias pendientes" },
+  { id: "en_revision", label: "En revisión" },
+  { id: "apelaciones", label: "Apelaciones" },
+  { id: "historial", label: "Historial" },
+];
 
 function GestionIncidenciasPage() {
-  usePageTitle('Gestión de Incidencias');
+  usePageTitle("Gestión de Incidencias");
   const navigate = useNavigate();
-  // Grupos unificados por producto
-  const [grupos, setGrupos] = useState([]);
-  const [filterEstado, setFilterEstado] = useState('todas');
-  // Origen: 'todos' | 'incidencia' | 'reporte'
-  const [filterOrigen, setFilterOrigen] = useState('todos');
-  const [selectedGroupId, setSelectedGroupId] = useState(null);
-  const [modalData, setModalData] = useState({ isOpen: false, type: 'info', title: '', message: '', onConfirm: null });
-  const [decisionReason, setDecisionReason] = useState('');
-  const [userRole] = useState('Admin'); // Demo: cambiar a 'Moderador' para probar
-  const [moderadorId] = useState(1); // Demo: ID del moderador actual
+
+  const [initializing, setInitializing] = useState(true);
+  const [isAuthorized, setIsAuthorized] = useState(false);
+  const [currentUser, setCurrentUser] = useState(null);
+  const [userRole, setUserRole] = useState(null);
+  const [reports, setReports] = useState([]);
+  const [incidences, setIncidences] = useState([]);
+  const [appeals, setAppeals] = useState([]);
+  const [moderators, setModerators] = useState([]);
+  const [selectedTab, setSelectedTab] = useState("pendientes");
+  const [searchTerm, setSearchTerm] = useState("");
+  const [priorityFilter, setPriorityFilter] = useState("todos");
+  const [decisionNotes, setDecisionNotes] = useState({});
+  const [assignmentTargets, setAssignmentTargets] = useState({});
+  const [modalData, setModalData] = useState({
+    isOpen: false,
+    type: "info",
+    title: "",
+    message: "",
+    onConfirm: null,
+  });
+  const [fetchingData, setFetchingData] = useState(false);
+  const [actionLoading, setActionLoading] = useState(false);
 
   useEffect(() => {
-    const loadData = async () => {
-      try {
-        // Obtener incidencias y reportes en paralelo
-        const [rawIncidences, rawReports] = await Promise.all([
-          incidenceAPI.getAll().catch(() => []),
-          reportAPI.getAll().catch(() => [])
-        ]);
+    const access = checkAdminAccess("gestionar_incidencias");
 
-        const incidencesArray = Array.isArray(rawIncidences) ? rawIncidences : [];
-        const reportsArray = Array.isArray(rawReports) ? rawReports : [];
+    if (!access.isAllowed) {
+      navigate(access.redirectPath || "/");
+      return;
+    }
 
-        // Reunir todos los productIds únicos para hacer fetch de producto/seller
-        const allProductIds = [
-          ...new Set([
-            ...incidencesArray.map(i => i.productId).filter(Boolean),
-            ...reportsArray.map(r => r.productId).filter(Boolean)
-          ])
-        ];
+    const userData = authAPI.getUserData();
+    const resolvedRole = normalizeRole(
+      access.userRole || userData?.roles?.[0] || userData?.role || ROLES.USUARIO
+    );
 
-        // Cache local de productos para evitar llamadas repetidas
-        const productCache = {};
-        for (const pid of allProductIds) {
-          try {
-            const p = await productAPI.getProductById(pid);
-            productCache[pid] = p;
-          } catch {
-            productCache[pid] = null;
-          }
-        }
+    setCurrentUser(userData || null);
+    setUserRole(resolvedRole);
+    setIsAuthorized(true);
+    setInitializing(false);
+  }, [navigate]);
 
-        // Cache de vendedores
-        const sellerCache = {};
-        const sellerIds = [
-          ...new Set(Object.values(productCache).map(p => p?.sellerId).filter(Boolean))
-        ];
-        for (const sid of sellerIds) {
-          try {
-            const s = await userAPI.getUserById(sid);
-            sellerCache[sid] = s;
-          } catch {
-            sellerCache[sid] = null;
-          }
-        }
+  useEffect(() => {
+    if (!isAuthorized) return;
+    refreshData();
+    if (userRole === ROLES.ADMIN) {
+      loadModerators();
+    }
+  }, [isAuthorized, userRole]);
 
-  const estadoMap = { pending: 'pendiente', in_review: 'en_revision', reviewing: 'en_revision', resolved: 'resuelto', suspended: 'suspendido', suspendido: 'suspendido' };
+  const loadModerators = async () => {
+    try {
+      const { data } = await api.get("/users/");
+      const parsed = (Array.isArray(data) ? data : [])
+        .map((user) => {
+          const backendRole =
+            user?.Roles?.[0]?.roleName || user?.role || "Usuario";
+          const normalized = normalizeRole(backendRole);
+          if (normalized !== ROLES.MODERADOR && normalized !== ROLES.ADMIN)
+            return null;
+          const label =
+            `${user.name || ""} ${user.lastname || ""}`.trim() ||
+            user.email ||
+            `Usuario ${user.id}`;
+          return { id: user.id, name: label, role: normalized };
+        })
+        .filter(Boolean);
+      setModerators(parsed);
+    } catch {
+      // Silently ignore, admin still can autoasignarse
+    }
+  };
 
-        // Mapear incidencias (detección automática)
-        const mappedIncidences = incidencesArray.map(inc => {
-          const product = productCache[inc.productId];
-          const vendedorId = product?.sellerId || inc.userId || null;
-          const vendedorObj = vendedorId ? sellerCache[vendedorId] : null;
-          const vendedorNombre = vendedorObj ? `${vendedorObj.name || ''} ${vendedorObj.lastname || ''}`.trim() || `ID ${vendedorId}` : `ID ${vendedorId || '-'}`;
+  const refreshData = async () => {
+    try {
+      setFetchingData(true);
+      const [reportsData, incidencesData, appealsData] = await Promise.all([
+        reportAPI.getAll().catch(() => []),
+        incidenceAPI.getAll().catch(() => []),
+        appealAPI.getAll().catch(() => []),
+      ]);
 
-          let moderadorNombre = null;
-          if (inc.moderatorId) {
-            moderadorNombre = `Moderador ${inc.moderatorId}`; // Se podría enriquecer con userAPI si necesario
-          }
+      const normalizedAppeals = (
+        Array.isArray(appealsData) ? appealsData : []
+      ).map(normalizeAppeal);
+      const normalizedReports = (
+        Array.isArray(reportsData) ? reportsData : []
+      ).map(normalizeReport);
+      const normalizedIncidences = (
+        Array.isArray(incidencesData) ? incidencesData : []
+      ).map((item) => normalizeIncidence(item, normalizedAppeals));
 
-            const firstPhoto = product?.ProductPhotos && product.ProductPhotos[0]?.url;
-            const foto = firstPhoto ? (firstPhoto.startsWith('http') ? firstPhoto : `${API_BASE_URL}${firstPhoto}`) : null;
+      setAppeals(normalizedAppeals);
+      setReports(normalizedReports);
+      setIncidences(normalizedIncidences);
+    } catch (error) {
+      console.error("Error al cargar incidencias:", error);
+      setModalData({
+        isOpen: true,
+        type: "error",
+        title: "Error al cargar datos",
+        message:
+          "No pudimos obtener el estado actualizado de reportes e incidencias. Intenta nuevamente en unos segundos.",
+        confirmText: "Entendido",
+      });
+    } finally {
+      setFetchingData(false);
+    }
+  };
 
-          return {
-            id: inc.id,
-            fecha_incidencia: inc.dateIncidence || new Date().toISOString(),
-            estado: estadoMap[inc.status] || inc.status || 'pendiente',
-            descripcion: inc.description || '',
-            tipo: 'deteccion_automatica',
-            source: 'incidence',
-            producto: {
-              id: product?.id || inc.productId,
-              codigo: `PROD-${inc.productId}`,
-              titulo: product?.title || `Producto ${inc.productId}`,
-              vendedor: vendedorNombre,
-              vendedor_id: vendedorId,
-              precio: product?.price ?? 0,
-              foto
-            },
-            moderador_id: inc.moderatorId || null,
-            moderador_nombre: moderadorNombre,
-            vendedor_id: vendedorId,
-            product_id: inc.productId,
-            user_id: inc.userId || null,
-            date_incidence_raw: inc.dateIncidence || null,
-            apelaciones: [],
-            puede_apelar: false
-          };
-        });
+  const closeModal = () => setModalData((prev) => ({ ...prev, isOpen: false }));
 
-        // Mapear reportes (reporte de usuario)
-        const mappedReports = reportsArray.map(rep => {
-          const product = productCache[rep.productId];
-          const vendedorId = product?.sellerId || rep.userId || null;
-          const vendedorObj = vendedorId ? sellerCache[vendedorId] : null;
-          const vendedorNombre = vendedorObj ? `${vendedorObj.name || ''} ${vendedorObj.lastname || ''}`.trim() || `ID ${vendedorId}` : `ID ${vendedorId || '-'}`;
+  const showFeedback = (type, title, message) => {
+    setModalData({
+      isOpen: true,
+      type,
+      title,
+      message,
+      confirmText: "Entendido",
+    });
+  };
 
-          const firstPhoto = product?.ProductPhotos && product.ProductPhotos[0]?.url;
-          const foto = firstPhoto ? (firstPhoto.startsWith('http') ? firstPhoto : `${API_BASE_URL}${firstPhoto}`) : null;
+  const stats = useMemo(() => {
+    const pendingIncidences = incidences.filter(
+      (inc) => inc.estado === "pendiente"
+    );
+    const inReviewIncidences = incidences.filter(
+      (inc) => inc.estado === "en_revision"
+    );
+    const resolvedIncidences = incidences.filter(
+      (inc) => inc.estado === "resuelto"
+    );
+    const suspendedIncidences = incidences.filter(
+      (inc) => inc.estado === "suspendido"
+    );
+    const pendingAppeals = appeals.filter((ap) => ap.estado === "pendiente");
 
-          return {
-            id: rep.id,
-            fecha_incidencia: rep.dateReport || new Date().toISOString(),
-            estado: 'pendiente', // Los reportes comienzan como pendientes
-            descripcion: rep.description || '',
-            tipo: 'reporte_usuario',
-            source: 'report',
-            producto: {
-              id: product?.id || rep.productId,
-              codigo: `PROD-${rep.productId}`,
-              titulo: product?.title || `Producto ${rep.productId}`,
-              vendedor: vendedorNombre,
-              vendedor_id: vendedorId,
-              precio: product?.price ?? 0,
-              foto
-            },
-            moderador_id: null,
-            moderador_nombre: null,
-            vendedor_id: vendedorId,
-            product_id: rep.productId,
-            user_id: rep.userId || null,
-            reporte: {
-              comentario: rep.description || '',
-              usuario_id: rep.userId || null
-            },
-            apelaciones: [],
-            puede_apelar: false
-          };
-        });
+    return {
+      reportCount: reports.length,
+      pendingCount: pendingIncidences.length,
+      inReviewCount: inReviewIncidences.length,
+      resolvedCount: resolvedIncidences.length,
+      suspendedCount: suspendedIncidences.length,
+      appealCount: pendingAppeals.length,
+    };
+  }, [reports, incidences, appeals]);
 
-        // Unificar por product_id
-        const groupMap = new Map();
+  const incidencesForStats = useMemo(
+    () =>
+      incidences.map((inc) => ({
+        moderador_id: inc.moderadorId,
+        estado: inc.estado,
+      })),
+    [incidences]
+  );
 
-        const pushToGroup = (item, type) => {
-          const pid = item.product_id || item.producto?.id;
-          if (!pid) return;
-          if (!groupMap.has(pid)) {
-            groupMap.set(pid, {
-              id: pid,
-              producto: item.producto,
-              incidencias: [],
-              reportes: [],
-              fecha_ultima: item.fecha_incidencia || new Date().toISOString(),
-              estado: 'pendiente'
-            });
-          }
-          const g = groupMap.get(pid);
-          if (type === 'incidencia') g.incidencias.push(item);
-          if (type === 'reporte') g.reportes.push(item);
-          // actualizar última fecha
-          const d1 = new Date(g.fecha_ultima).getTime();
-          const d2 = new Date(item.fecha_incidencia).getTime();
-          if (d2 > d1) g.fecha_ultima = item.fecha_incidencia;
-        };
+  const moderatorStats = useMemo(() => {
+    if (!currentUser?.id) return null;
+    return obtenerEstadisticasModerador(currentUser.id, incidencesForStats);
+  }, [currentUser, incidencesForStats]);
 
-        mappedIncidences.forEach(i => pushToGroup(i, 'incidencia'));
-        mappedReports.forEach(r => pushToGroup(r, 'reporte'));
+  const capacityWarning = moderatorStats
+    ? obtenerMensajeValidacion(moderatorStats)
+    : null;
 
-        // Agregar estado agregado por prioridad: en_revision > pendiente > suspendido > resuelto
-        const prioridad = { en_revision: 4, pendiente: 3, suspendido: 2, resuelto: 1 };
-        const groupsArr = Array.from(groupMap.values()).map(g => {
-          const estados = [
-            ...g.incidencias.map(i => i.estado),
-            ...g.reportes.map(r => r.estado)
-          ];
-          let estadoAgregado = 'pendiente';
-          let maxScore = 0;
-          estados.forEach(st => {
-            const score = prioridad[st] || 0;
-            if (score > maxScore) { maxScore = score; estadoAgregado = st; }
-          });
-          return {
-            ...g,
-            estado: estadoAgregado
-          };
-        });
+  const filteredIncidences = useMemo(() => {
+    return incidences.filter((incidence) => {
+      if (priorityFilter !== "todos" && incidence.prioridad !== priorityFilter)
+        return false;
 
-        // Orden por fecha más reciente
-        groupsArr.sort((a, b) => new Date(b.fecha_ultima) - new Date(a.fecha_ultima));
-        setGrupos(groupsArr);
-      } catch (err) {
-        console.error('Error al cargar incidencias/reportes:', err);
-        setGrupos([]);
+      if (searchTerm.trim() === "") return true;
+      const term = searchTerm.trim().toLowerCase();
+      return (
+        incidence.codigo.toLowerCase().includes(term) ||
+        incidence.productTitle.toLowerCase().includes(term) ||
+        (incidence.reporterName || "").toLowerCase().includes(term) ||
+        (incidence.moderadorNombre || "").toLowerCase().includes(term)
+      );
+    });
+  }, [incidences, priorityFilter, searchTerm]);
+
+  const filteredReports = useMemo(() => {
+    if (searchTerm.trim() === "") return reports;
+    const term = searchTerm.trim().toLowerCase();
+    return reports.filter(
+      (report) =>
+        report.productTitle.toLowerCase().includes(term) ||
+        (report.reporterName || "").toLowerCase().includes(term)
+    );
+  }, [reports, searchTerm]);
+
+  const canAssignOthers = userRole === ROLES.ADMIN;
+  const canResolve = userRole === ROLES.ADMIN || userRole === ROLES.MODERADOR;
+
+  const ensureCapacityBeforeTaking = () => {
+    if (!moderatorStats || !userRole) return true;
+    if (!puedeTomarIncidencia(userRole, moderatorStats)) {
+      const warning = obtenerMensajeValidacion(moderatorStats);
+      showFeedback(
+        "warning",
+        "Capacidad alcanzada",
+        warning || "Has alcanzado el límite de incidencias activas."
+      );
+      return false;
+    }
+    return true;
+  };
+
+  const confirmConvertReport = (report, takeImmediately = false) => {
+    if (takeImmediately && !ensureCapacityBeforeTaking()) {
+      return;
+    }
+
+    setModalData({
+      isOpen: true,
+      type: "confirm",
+      title: takeImmediately
+        ? "Convertir y tomar incidencia"
+        : "Convertir en incidencia",
+      message: takeImmediately
+        ? "Crearemos una incidencia con este reporte y la tomaremos inmediatamente bajo tu responsabilidad."
+        : "Crearemos una incidencia con este reporte para que pueda ser gestionada por el equipo.",
+      confirmText: takeImmediately ? "Convertir y tomar" : "Convertir",
+      cancelText: "Cancelar",
+      onConfirm: () => executeConvertReport(report, takeImmediately),
+    });
+  };
+
+  const executeConvertReport = async (report, takeImmediately) => {
+    try {
+      setActionLoading(true);
+      const payload = {
+        reportId: report.id,
+        productId: report.productId,
+        tipo: report.type,
+        estado: takeImmediately ? "en_revision" : "pendiente",
+        descripcion: report.description,
+        reporterId: report.reporterId,
+        dateReport: report.createdAt,
+        prioridad: "media",
+      };
+
+      if (takeImmediately && currentUser?.id) {
+        payload.moderadorId = currentUser.id;
+        payload.moderador_id = currentUser.id;
       }
+
+      await incidenceAPI.create(payload);
+      await reportAPI.remove(report.id);
+      await refreshData();
+      showFeedback(
+        "success",
+        "Reporte convertido",
+        "Se creó la incidencia correctamente."
+      );
+    } catch (error) {
+      console.error("Error al convertir reporte:", error);
+      showFeedback(
+        "error",
+        "No se pudo convertir",
+        "Ocurrió un error al convertir el reporte en incidencia."
+      );
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleDismissReport = (report) => {
+    setModalData({
+      isOpen: true,
+      type: "confirm",
+      title: "Descartar reporte",
+      message:
+        "Esta acción cerrará el reporte sin crear una incidencia. ¿Deseas continuar?",
+      confirmText: "Descartar",
+      cancelText: "Cancelar",
+      onConfirm: () => executeDismissReport(report),
+    });
+  };
+
+  const executeDismissReport = async (report) => {
+    try {
+      setActionLoading(true);
+      await reportAPI.remove(report.id);
+      await refreshData();
+      showFeedback(
+        "success",
+        "Reporte descartado",
+        "El reporte fue eliminado y el usuario será notificado."
+      );
+    } catch (error) {
+      console.error("Error al descartar reporte:", error);
+      showFeedback(
+        "error",
+        "No se pudo descartar",
+        "Reintenta en unos segundos."
+      );
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleTakeIncidence = (incidence) => {
+    if (!ensureCapacityBeforeTaking()) {
+      return;
+    }
+
+    setModalData({
+      isOpen: true,
+      type: "confirm",
+      title: "Tomar incidencia",
+      message:
+        'La incidencia quedará marcada como "En revisión" bajo tu responsabilidad. ¿Confirmas que deseas tomarla?',
+      confirmText: "Tomar incidencia",
+      cancelText: "Cancelar",
+      onConfirm: () => executeTakeIncidence(incidence),
+    });
+  };
+
+  const executeTakeIncidence = async (incidence) => {
+    if (!currentUser?.id) {
+      showFeedback(
+        "error",
+        "Sesión no disponible",
+        "No encontramos tu información de usuario. Intenta volver a iniciar sesión."
+      );
+      return;
+    }
+
+    try {
+      setActionLoading(true);
+      const payload = {
+        estado: "en_revision",
+        moderadorId: currentUser.id,
+        moderador_id: currentUser.id,
+        fechaAsignacion: new Date().toISOString(),
+      };
+      await incidenceAPI.update(incidence.id, payload);
+      await refreshData();
+      showFeedback(
+        "success",
+        "Incidencia tomada",
+        "Ahora eres responsable de esta incidencia."
+      );
+    } catch (error) {
+      console.error("Error al tomar incidencia:", error);
+      showFeedback(
+        "error",
+        "No se pudo tomar",
+        "No logramos asignarte la incidencia. Intenta más tarde."
+      );
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleAssignmentChange = (incidenceId, moderatorId) => {
+    setAssignmentTargets((prev) => ({ ...prev, [incidenceId]: moderatorId }));
+  };
+
+  const handleReassignIncidence = (incidence) => {
+    if (incidence.hasPendingAppeal) {
+      showFeedback(
+        "warning",
+        "No es posible reasignar",
+        "La incidencia tiene una apelación pendiente. Debe resolverse antes de cambiar al moderador responsable."
+      );
+      return;
+    }
+
+    const targetId = assignmentTargets[incidence.id];
+    if (!targetId) {
+      showFeedback(
+        "warning",
+        "Selecciona un moderador",
+        "Debes seleccionar a qué moderador deseas reasignar la incidencia."
+      );
+      return;
+    }
+
+    const targetModerator = moderators.find(
+      (mod) => mod.id === parseNumericId(targetId)
+    );
+    if (!targetModerator) {
+      showFeedback(
+        "error",
+        "Moderador no encontrado",
+        "Actualiza la lista de moderadores antes de reasignar."
+      );
+      return;
+    }
+
+    setModalData({
+      isOpen: true,
+      type: "confirm",
+      title: "Reasignar incidencia",
+      message: `La incidencia pasará a ${targetModerator.name}. ¿Confirmas la reasignación?`,
+      confirmText: "Reasignar",
+      cancelText: "Cancelar",
+      onConfirm: () => executeReassignIncidence(incidence, targetModerator),
+    });
+  };
+
+  const executeReassignIncidence = async (incidence, targetModerator) => {
+    try {
+      setActionLoading(true);
+      const payload = {
+        moderadorId: targetModerator.id,
+        moderador_id: targetModerator.id,
+        estado: "en_revision",
+        reassignedBy: currentUser?.id,
+        fechaAsignacion: new Date().toISOString(),
+      };
+      await incidenceAPI.update(incidence.id, payload);
+      await refreshData();
+      showFeedback(
+        "success",
+        "Incidencia reasignada",
+        `Ahora ${targetModerator.name} es responsable del caso.`
+      );
+      setAssignmentTargets((prev) => ({ ...prev, [incidence.id]: undefined }));
+    } catch (error) {
+      console.error("Error al reasignar incidencia:", error);
+      showFeedback(
+        "error",
+        "No se pudo reasignar",
+        "Reintenta en unos segundos."
+      );
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleResolveIncidence = (incidence, decision) => {
+    if (!canResolve) return;
+
+    if (incidence.hasPendingAppeal && userRole !== ROLES.ADMIN) {
+      showFeedback(
+        "warning",
+        "Apelación pendiente",
+        "Solo un administrador puede tomar una decisión final mientras exista una apelación abierta."
+      );
+      return;
+    }
+
+    const messages = {
+      aprobar:
+        "El producto podrá seguir publicado y la incidencia se cerrará como resuelta.",
+      rechazar:
+        "El producto será marcado con la observación correspondiente. ¿Confirmas el rechazo?",
+      suspender:
+        "El producto quedará suspendido y la incidencia se mantendrá visible en el historial.",
     };
 
-    loadData();
-  }, []);
-
-  const gruposFiltrados = grupos.filter(g => {
-    const matchEstado = filterEstado === 'todas' || g.estado === filterEstado;
-    const matchOrigen = filterOrigen === 'todos' ||
-      (filterOrigen === 'incidencia' && g.incidencias.length > 0) ||
-      (filterOrigen === 'reporte' && g.reportes.length > 0);
-    return matchEstado && matchOrigen;
-  });
-
-  // Obtener estadísticas del moderador actual
-  const todasIncidenciasPlanas = grupos.flatMap(g => g.incidencias);
-  const estadisticasModerador = obtenerEstadisticasModerador(moderadorId, todasIncidenciasPlanas);
-
-  // Verificar si el moderador puede tomar incidencias
-  const puedeTomarMas = puedeTomarIncidencia(userRole, estadisticasModerador);
-  const mensajeValidacion = obtenerMensajeValidacion(estadisticasModerador);
-
-  // Función para asignar incidencia
-  const asignarIncidencia = (incidencia) => {
-    // Validar permisos
-    if (!puedeTomarMas) {
-      setModalData({
-        isOpen: true,
-        type: 'error',
-        title: 'No puedes tomar más incidencias',
-        message: mensajeValidacion,
-        confirmText: 'Entendido'
-      });
-      return;
-    }
-
-    // Mostrar confirmación
     setModalData({
       isOpen: true,
-      type: 'confirm',
-      title: 'Tomar Incidencia',
-      message: `¿Deseas asignarte esta incidencia?\n\nProducto: ${incidencia.producto.titulo}\n\n📊 Estadísticas:\nIncidencias activas: ${estadisticasModerador.incidenciasActivas}/${LIMITES_INCIDENCIAS.MAX_INCIDENCIAS_ACTIVAS_POR_MODERADOR}`,
-      onConfirm: async () => {
-        // Actualizar dentro de la estructura agrupada
-        setGrupos(prev => prev.map(g => g.id === incidencia.producto.id ? {
-          ...g,
-          incidencias: g.incidencias.map(i => i.id === incidencia.id ? {
-            ...i,
-            estado: 'en_revision',
-            moderador_id: moderadorId,
-            moderador_nombre: 'Tú (Moderador)',
-            fecha_asignacion: new Date().toISOString()
-          } : i),
-          estado: 'en_revision'
-        } : g));
-        // Actualizar estado de moderación del producto a 'review'
-        try {
-          await productAPI.updateModerationStatus(incidencia.producto.id, 'review');
-        } catch {
-          // Ignorar error de sincronización; se mostrará en UI si es crítico
-        }
-
-        // Mostrar éxito y advertencia si aplica
-        const nuevosMensaje = estadisticasModerador.capacidadDisponible === 1
-          ? `Incidencia asignada.\n\n⚠️ ${mensajeValidacion}`
-          : 'Incidencia asignada correctamente';
-
-        setModalData({
-          isOpen: true,
-          type: 'success',
-          title: 'Asignado',
-          message: nuevosMensaje,
-          confirmText: 'Entendido'
-        });
-        setSelectedGroupId(null);
-      },
-      confirmText: 'Asignar',
-      cancelText: 'Cancelar'
+      type: "confirm",
+      title: "Confirmar decisión",
+      message:
+        messages[decision] ||
+        "Esta acción actualizará el estado de la incidencia.",
+      confirmText: "Confirmar",
+      cancelText: "Cancelar",
+      onConfirm: () => executeResolveIncidence(incidence, decision),
     });
   };
 
-  // Función para resolver incidencia
-  const resolverIncidencia = (incidencia, decision) => {
-    const accion = decision === 'aprobar' ? 'aprobar' : 'rechazar';
+  const executeResolveIncidence = async (incidence, decision) => {
+    try {
+      setActionLoading(true);
+      const payload = {
+        estado: decision === "suspender" ? "suspendido" : "resuelto",
+        decision,
+        notas: decisionNotes[incidence.id] || "",
+        fechaResolucion: new Date().toISOString(),
+        resolvedBy: currentUser?.id,
+      };
 
-    setModalData({
-      isOpen: true,
-      type: 'confirm',
-      title: `${decision === 'aprobar' ? 'Aprobar' : 'Rechazar'} Producto`,
-      message: `¿Estás seguro de ${accion} este producto?\n\nProducto: ${incidencia.producto.titulo}`,
-      onConfirm: async () => {
-        // Reflejar resolución en estructura agrupada
-        setGrupos(prev => prev.map(g => g.id === incidencia.producto.id ? {
-          ...g,
-          incidencias: g.incidencias.map(i => i.id === incidencia.id ? {
-            ...i,
-            estado: 'resuelto',
-            decision_final: decision,
-            razon_decision: decisionReason,
-            fecha_resolucion: new Date().toISOString()
-          } : i),
-          // Si todas las incidencias y reportes quedan resueltas marcar grupo resuelto
-          estado: 'resuelto'
-        } : g));
-        // Sincronizar moderación del producto según decisión
-        try {
-          if (decision === 'aprobar') {
-            await productAPI.updateModerationStatus(incidencia.producto.id, 'active');
-          } else {
-            // Rechazar o suspender bloquea el producto
-            await productAPI.updateModerationStatus(incidencia.producto.id, 'block');
+      await incidenceAPI.update(incidence.id, payload);
+      await refreshData();
+      setDecisionNotes((prev) => ({ ...prev, [incidence.id]: "" }));
+      showFeedback(
+        "success",
+        "Incidencia actualizada",
+        "Se registró tu decisión y se notificó al vendedor."
+      );
+    } catch (error) {
+      console.error("Error al resolver incidencia:", error);
+      showFeedback("error", "No se pudo actualizar", "Intenta nuevamente.");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  if (initializing) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <div className="w-12 h-12 border-4 border-orange-200 border-t-orange-500 rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-gray-600">Verificando permisos...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isAuthorized) {
+    return null;
+  }
+
+  const renderReportList = () => {
+    if (!filteredReports.length) {
+      return (
+        <EmptyState
+          icon={FiInbox}
+          title="Sin reportes pendientes"
+          description="Cuando un comprador reporte un producto, aparecerá aquí para que puedas convertirlo en incidencia."
+        />
+      );
+    }
+
+    return (
+      <div className="space-y-4">
+        {filteredReports.map((report) => (
+          <div
+            key={report.id}
+            className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm"
+          >
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <p className="text-xs text-gray-500 font-semibold uppercase mb-1">
+                  Reporte #{report.id}
+                </p>
+                <h3 className="text-xl font-bold text-gray-900">
+                  {report.productTitle}
+                </h3>
+                <p className="text-sm text-gray-600 mt-2">
+                  {report.description || "Sin descripción del reporte."}
+                </p>
+                <div className="flex flex-wrap gap-3 mt-4 text-sm text-gray-600">
+                  <span className="px-3 py-1 rounded-full bg-orange-50 text-orange-700 font-medium inline-flex items-center gap-2">
+                    <FiTag /> {report.type}
+                  </span>
+                  <span className="px-3 py-1 rounded-full bg-gray-100">
+                    Reportado por: {report.reporterName}
+                  </span>
+                  <span className="px-3 py-1 rounded-full bg-gray-100">
+                    {formatDate(report.createdAt)}
+                  </span>
+                </div>
+              </div>
+              <div className="flex flex-col sm:flex-row gap-3 w-full lg:w-auto">
+                <button
+                  disabled={actionLoading}
+                  onClick={() => confirmConvertReport(report, true)}
+                  className="flex-1 px-4 py-3 bg-orange-600 hover:bg-orange-700 text-white font-semibold rounded-xl transition disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Convertir y tomar
+                </button>
+                <button
+                  disabled={actionLoading}
+                  onClick={() => confirmConvertReport(report, false)}
+                  className="flex-1 px-4 py-3 bg-gray-900 hover:bg-black text-white font-semibold rounded-xl transition disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Convertir
+                </button>
+                <button
+                  disabled={actionLoading}
+                  onClick={() => handleDismissReport(report)}
+                  className="flex-1 px-4 py-3 bg-white border border-gray-300 hover:border-red-400 text-gray-700 font-semibold rounded-xl transition disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Descartar
+                </button>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  const renderIncidenceList = (list, isHistory = false) => {
+    if (!list.length) {
+      return (
+        <EmptyState
+          icon={FiAlertTriangle}
+          title={
+            isHistory
+              ? "Sin incidencias cerradas"
+              : "No hay incidencias en esta vista"
           }
-        } catch {
-          // Ignorar errores puntuales, ya que el flujo principal fue local
-        }
-  setSelectedGroupId(null);
-        setDecisionReason('');
-        setModalData({
-          isOpen: true,
-          type: 'success',
-          title: 'Resuelto',
-          message: `Producto ${decision === 'aprobar' ? 'aprobado' : 'rechazado'} correctamente`,
-          confirmText: 'Entendido'
-        });
-      },
-      confirmText: decision === 'aprobar' ? 'Aprobar' : 'Rechazar',
-      cancelText: 'Cancelar'
-    });
-  };
-
-  // Función para reasignar (solo Admin)
-  const reasignarIncidencia = (incidencia) => {
-    if (userRole !== 'Admin') {
-      setModalData({
-        isOpen: true,
-        type: 'error',
-        title: 'Acceso denegado',
-        message: 'Solo el administrador puede reasignar incidencias',
-        confirmText: 'Entendido'
-      });
-      return;
+          description={
+            isHistory
+              ? "Cuando cierres incidencias aparecerán aquí para consulta."
+              : "Cuando existan incidencias en este estado se mostrarán en esta pestaña."
+          }
+        />
+      );
     }
 
-    setModalData({
-      isOpen: true,
-      type: 'confirm',
-      title: 'Reasignar Incidencia',
-      message: `¿Deseas reasignar esta incidencia a otro moderador?\n\nProducto: ${incidencia.producto.titulo}\nModerador actual: ${incidencia.moderador_nombre}`,
-      onConfirm: () => {
-        // Reasignar a otro moderador (para demo, cambiar a 2)
-        const nuevoModId = incidencia.moderador_id === 1 ? 2 : 1;
-        setGrupos(prev => prev.map(g => g.id === incidencia.producto.id ? {
-          ...g,
-          incidencias: g.incidencias.map(i => i.id === incidencia.id ? {
-            ...i,
-            moderador_id: nuevoModId,
-            moderador_nombre: `Moderador ${nuevoModId}`
-          } : i)
-        } : g));
-        setModalData({
-          isOpen: true,
-          type: 'success',
-          title: 'Reasignado',
-          message: 'Incidencia reasignada correctamente',
-          confirmText: 'Entendido'
-        });
-  setSelectedGroupId(null);
-      },
-      confirmText: 'Reasignar',
-      cancelText: 'Cancelar'
-    });
+    return (
+      <div className="space-y-4">
+        {list.map((incidence) => (
+          <div
+            key={incidence.id}
+            className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm"
+          >
+            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+              <div>
+                <p className="text-xs text-gray-500 font-semibold uppercase mb-1">
+                  {incidence.codigo}
+                </p>
+                <h3 className="text-xl font-bold text-gray-900">
+                  {incidence.productTitle}
+                </h3>
+                <div className="flex flex-wrap gap-3 mt-3">
+                  <span className="px-3 py-1 text-xs font-semibold rounded-full bg-blue-50 text-blue-700 inline-flex items-center gap-2">
+                    <FiClock className="text-blue-500" />{" "}
+                    {formatDate(incidence.createdAt)}
+                  </span>
+                  <span className="px-3 py-1 text-xs font-semibold rounded-full bg-gray-100 inline-flex items-center gap-2">
+                    <FiTag /> {incidence.tipo}
+                  </span>
+                  <span
+                    className={`px-3 py-1 text-xs font-semibold rounded-full ${
+                      incidence.prioridad === "alta"
+                        ? "bg-red-50 text-red-700"
+                        : incidence.prioridad === "baja"
+                        ? "bg-green-50 text-green-700"
+                        : "bg-amber-50 text-amber-700"
+                    }`}
+                  >
+                    Prioridad {incidence.prioridad}
+                  </span>
+                  {incidence.hasPendingAppeal && (
+                    <span className="px-3 py-1 text-xs font-semibold rounded-full bg-purple-50 text-purple-700">
+                      Apelación pendiente
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <div className="text-sm text-gray-600 space-y-2">
+                <p>
+                  Reportado por:{" "}
+                  <span className="font-semibold text-gray-900">
+                    {incidence.reporterName || "No disponible"}
+                  </span>
+                </p>
+                <p>
+                  Moderador asignado:{" "}
+                  <span className="font-semibold text-gray-900">
+                    {incidence.moderadorNombre || "Sin asignar"}
+                  </span>
+                </p>
+                {incidence.updatedAt && (
+                  <p>Última actualización: {formatDate(incidence.updatedAt)}</p>
+                )}
+              </div>
+            </div>
+
+            {!isHistory && incidence.estado === "pendiente" && (
+              <div className="mt-6 bg-gray-50 border border-dashed border-gray-300 rounded-2xl p-4">
+                <p className="text-sm font-semibold text-gray-800 mb-3">
+                  Acciones disponibles
+                </p>
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                  <button
+                    disabled={actionLoading}
+                    onClick={() => handleTakeIncidence(incidence)}
+                    className="px-4 py-3 rounded-xl bg-orange-600 text-white font-semibold hover:bg-orange-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Tomar incidencia
+                  </button>
+
+                  {canAssignOthers && (
+                    <div className="flex flex-col sm:flex-row gap-3 w-full lg:w-auto">
+                      <select
+                        className="flex-1 border border-gray-300 rounded-xl px-3 py-2"
+                        value={assignmentTargets[incidence.id] || ""}
+                        onChange={(e) =>
+                          handleAssignmentChange(incidence.id, e.target.value)
+                        }
+                      >
+                        <option value="">Seleccionar moderador</option>
+                        {moderators.map((moderator) => (
+                          <option key={moderator.id} value={moderator.id}>
+                            {moderator.name}{" "}
+                            {moderator.role === ROLES.ADMIN ? "(Admin)" : ""}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        disabled={actionLoading}
+                        onClick={() => handleReassignIncidence(incidence)}
+                        className="px-4 py-2 bg-white border border-gray-300 rounded-xl font-semibold text-gray-700 hover:bg-gray-100 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Asignar
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {!isHistory && incidence.estado === "en_revision" && (
+              <div className="mt-6">
+                <label className="block text-sm font-semibold text-gray-800 mb-2">
+                  Observaciones / decisión
+                </label>
+                <textarea
+                  value={decisionNotes[incidence.id] || ""}
+                  onChange={(e) =>
+                    setDecisionNotes((prev) => ({
+                      ...prev,
+                      [incidence.id]: e.target.value,
+                    }))
+                  }
+                  rows="3"
+                  placeholder="Describe la resolución tomada para informar al vendedor y registrar evidencia."
+                  className="w-full border border-gray-300 rounded-2xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                />
+                <div className="flex flex-col sm:flex-row gap-3 mt-4">
+                  <button
+                    disabled={actionLoading || !canResolve}
+                    onClick={() => handleResolveIncidence(incidence, "aprobar")}
+                    className="flex-1 px-4 py-3 bg-green-600 text-white font-semibold rounded-xl hover:bg-green-700 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                  >
+                    <MdVerified /> Aprobar
+                  </button>
+                  <button
+                    disabled={actionLoading || !canResolve}
+                    onClick={() =>
+                      handleResolveIncidence(incidence, "rechazar")
+                    }
+                    className="flex-1 px-4 py-3 bg-red-600 text-white font-semibold rounded-xl hover:bg-red-700 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                  >
+                    <MdBlock /> Rechazar
+                  </button>
+                  <button
+                    disabled={actionLoading || !canResolve}
+                    onClick={() =>
+                      handleResolveIncidence(incidence, "suspender")
+                    }
+                    className="flex-1 px-4 py-3 bg-purple-600 text-white font-semibold rounded-xl hover:bg-purple-700 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                  >
+                    <FiAlertTriangle /> Suspender
+                  </button>
+                  {canAssignOthers && (
+                    <button
+                      disabled={actionLoading}
+                      onClick={() => handleReassignIncidence(incidence)}
+                      className="flex-1 px-4 py-3 bg-white border border-gray-300 rounded-xl font-semibold text-gray-700 hover:bg-gray-100 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Reasignar
+                    </button>
+                  )}
+                </div>
+                {incidence.hasPendingAppeal && (
+                  <p className="mt-3 text-sm text-purple-700">
+                    Esta incidencia tiene una apelación pendiente. Documenta
+                    cada decisión para que quede registro.
+                  </p>
+                )}
+              </div>
+            )}
+
+            {isHistory && (
+              <div className="mt-4 flex flex-wrap gap-3 text-sm text-gray-600">
+                <span className="px-3 py-1 bg-green-50 text-green-700 rounded-full font-semibold">
+                  Estado final: {incidence.estado}
+                </span>
+                {incidence.notas && (
+                  <span className="px-3 py-1 bg-gray-50 rounded-full">
+                    Notas: {incidence.notas}
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    );
   };
 
-  const getEstadoColor = (estado) => {
-    switch (estado) {
-      case 'pendiente': return 'bg-yellow-100 text-yellow-800 border-yellow-300';
-      case 'en_revision': return 'bg-blue-100 text-blue-800 border-blue-300';
-      case 'suspendido': return 'bg-purple-100 text-purple-800 border-purple-300';
-      case 'resuelto': return 'bg-green-100 text-green-800 border-green-300';
-      default: return 'bg-gray-100 text-gray-800';
+  const renderAppeals = () => {
+    if (!appeals.length) {
+      return (
+        <EmptyState
+          icon={FiUsers}
+          title="Sin apelaciones activas"
+          description="Cuando un vendedor apele una decisión se mostrará aquí para que puedas darle seguimiento."
+        />
+      );
     }
+
+    return (
+      <div className="space-y-4">
+        {appeals.map((appeal) => (
+          <div
+            key={appeal.id}
+            className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm"
+          >
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+              <div>
+                <p className="text-xs text-gray-500 font-semibold uppercase mb-1">
+                  Apelación #{appeal.id}
+                </p>
+                <h3 className="text-lg font-bold text-gray-900">
+                  Incidencia vinculada: {appeal.incidenceId}
+                </h3>
+                <p className="text-sm text-gray-600 mt-2">
+                  {appeal.motivo || "Sin motivo registrado."}
+                </p>
+              </div>
+              <div className="text-sm text-gray-600">
+                <p>
+                  Estado:{" "}
+                  <span className="font-semibold text-purple-700 capitalize">
+                    {appeal.estado}
+                  </span>
+                </p>
+                <p>Recibido: {formatDate(appeal.createdAt)}</p>
+              </div>
+            </div>
+            <p className="text-sm text-gray-500 mt-4">
+              Dirígete a la incidencia vinculada para tomar una decisión. Las
+              apelaciones no se resuelven de forma independiente.
+            </p>
+          </div>
+        ))}
+      </div>
+    );
   };
 
-  // (Ya no se usa getTipoColor tras agrupar por producto)
+  const renderContent = () => {
+    if (fetchingData) {
+      return (
+        <div className="py-20 flex flex-col items-center justify-center text-center">
+          <div className="w-12 h-12 border-4 border-gray-200 border-t-orange-500 rounded-full animate-spin mb-4"></div>
+          <p className="text-gray-600">Actualizando datos...</p>
+        </div>
+      );
+    }
 
-  const formatDate = (dateString) => {
-    const date = new Date(dateString);
-    return date.toLocaleString('es-ES', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+    switch (selectedTab) {
+      case "reportes":
+        return renderReportList();
+      case "pendientes":
+        return renderIncidenceList(
+          filteredIncidences.filter((inc) => inc.estado === "pendiente")
+        );
+      case "en_revision":
+        return renderIncidenceList(
+          filteredIncidences.filter((inc) => inc.estado === "en_revision")
+        );
+      case "apelaciones":
+        return renderAppeals();
+      case "historial":
+        return renderIncidenceList(
+          filteredIncidences.filter(
+            (inc) => inc.estado === "resuelto" || inc.estado === "suspendido"
+          ),
+          true
+        );
+      default:
+        return null;
+    }
   };
 
   return (
     <div className="min-h-screen bg-gray-50 py-8">
       <div className="sb-container max-w-7xl">
-        {/* Header */}
-        <div className="mb-6">
-          <h1 className="text-3xl font-black text-gray-900 flex items-center gap-2">
-            <FiAlertTriangle className="text-red-500" />
-            Gestión de Incidencias y Reportes
-          </h1>
-          <p className="text-gray-600 mt-1">Revisa y resuelve incidencias de productos reportados</p>
-
-          {/* Demo: Info del usuario actual */}
-          <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-            <p className="text-sm text-blue-900">
-              <FiInfo className="inline mr-2" />
-              <span className="font-semibold">Rol actual: {userRole}</span> |
-              <span className="ml-2">Incidencias activas: {estadisticasModerador.incidenciasActivas}/{LIMITES_INCIDENCIAS.MAX_INCIDENCIAS_ACTIVAS_POR_MODERADOR}</span>
-              {mensajeValidacion && <span className="ml-2 text-orange-700">⚠️ {mensajeValidacion}</span>}
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-6">
+          <div>
+            <h1 className="text-3xl font-black text-gray-900 flex items-center gap-3">
+              <FiAlertTriangle className="text-orange-500" /> Gestión de
+              Incidencias
+            </h1>
+            <p className="text-gray-600 mt-1">
+              Controla reportes, incidencias y apelaciones en un solo lugar.
             </p>
           </div>
+          <div className="flex flex-wrap gap-3">
+            <button
+              onClick={refreshData}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-xl font-semibold text-gray-700 hover:bg-gray-100"
+            >
+              <FiRefreshCw className="text-orange-500" /> Actualizar
+            </button>
+            <div className="px-4 py-2 bg-orange-50 text-orange-700 rounded-xl font-semibold flex items-center gap-2">
+              <FiUserCheck /> {userRole || "Sin rol"}
+            </div>
+          </div>
         </div>
 
-        {/* Filtros */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-6">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-2">Estado</label>
-              <select
-                value={filterEstado}
-                onChange={(e) => setFilterEstado(e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-              >
-                <option value="todas">Todas</option>
-                <option value="pendiente">Pendientes</option>
-                <option value="en_revision">En revisión</option>
-                <option value="resuelto">Resueltos</option>
-              </select>
+        <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-6">
+          <div className="bg-white border border-gray-200 rounded-2xl p-4">
+            <p className="text-xs text-gray-500 uppercase font-semibold">
+              Reportes
+            </p>
+            <p className="text-3xl font-black text-gray-900">
+              {stats.reportCount}
+            </p>
+            <p className="text-xs text-gray-500">Pendientes de convertir</p>
+          </div>
+          <div className="bg-white border border-gray-200 rounded-2xl p-4">
+            <p className="text-xs text-gray-500 uppercase font-semibold">
+              Pendientes
+            </p>
+            <p className="text-3xl font-black text-gray-900">
+              {stats.pendingCount}
+            </p>
+            <p className="text-xs text-gray-500">Listas para tomar</p>
+          </div>
+          <div className="bg-white border border-gray-200 rounded-2xl p-4">
+            <p className="text-xs text-gray-500 uppercase font-semibold">
+              En revisión
+            </p>
+            <p className="text-3xl font-black text-gray-900">
+              {stats.inReviewCount}
+            </p>
+            <p className="text-xs text-gray-500">Asignadas actualmente</p>
+          </div>
+          <div className="bg-white border border-gray-200 rounded-2xl p-4">
+            <p className="text-xs text-gray-500 uppercase font-semibold">
+              Apelaciones
+            </p>
+            <p className="text-3xl font-black text-gray-900">
+              {stats.appealCount}
+            </p>
+            <p className="text-xs text-gray-500">Solicitan seguimiento</p>
+          </div>
+          <div className="bg-white border border-gray-200 rounded-2xl p-4">
+            <p className="text-xs text-gray-500 uppercase font-semibold">
+              Cerradas
+            </p>
+            <p className="text-3xl font-black text-gray-900">
+              {stats.resolvedCount + stats.suspendedCount}
+            </p>
+            <p className="text-xs text-gray-500">Historial reciente</p>
+          </div>
+        </div>
+
+        {moderatorStats && (
+          <div className="mb-6 p-4 rounded-2xl border border-dashed border-gray-300 bg-white flex flex-col gap-2">
+            <div className="flex flex-wrap items-center gap-3 text-sm text-gray-700">
+              <span className="font-semibold">Tus incidencias activas:</span>
+              <span className="px-3 py-1 rounded-full bg-orange-50 text-orange-700 font-bold">
+                {moderatorStats.incidenciasActivas} /{" "}
+                {LIMITES_INCIDENCIAS.MAX_INCIDENCIAS_ACTIVAS_POR_MODERADOR}
+              </span>
+              <span className="px-3 py-1 rounded-full bg-green-50 text-green-700 font-semibold">
+                Capacidad disponible:{" "}
+                {Math.max(moderatorStats.capacidadDisponible, 0)}
+              </span>
+            </div>
+            {capacityWarning && (
+              <p className="text-sm text-amber-600 flex items-center gap-2">
+                <FiAlertTriangle /> {capacityWarning}
+              </p>
+            )}
+          </div>
+        )}
+
+        <div className="bg-white border border-gray-200 rounded-2xl p-4 mb-6">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex flex-wrap gap-2">
+              {TAB_OPTIONS.map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => setSelectedTab(tab.id)}
+                  className={`px-4 py-2 rounded-full text-sm font-semibold transition ${
+                    selectedTab === tab.id
+                      ? "bg-orange-600 text-white shadow-lg"
+                      : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
             </div>
 
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-2">Tipo</label>
-              <select
-                value={filterOrigen}
-                onChange={(e) => setFilterOrigen(e.target.value)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
-              >
-                <option value="todos">Todos</option>
-                <option value="incidencia">Incidencia</option>
-                <option value="reporte">Reporte</option>
-              </select>
-            </div>
-
-            {/* Estadísticas */}
-            <div className="grid grid-cols-3 gap-2">
-              <div className="bg-yellow-50 rounded-lg p-3 text-center border border-yellow-200">
-                <p className="text-lg font-bold text-yellow-600">{grupos.filter(g => g.estado === 'pendiente').length}</p>
-                <p className="text-xs text-yellow-700 font-semibold">Pendientes</p>
+            <div className="flex flex-col sm:flex-row gap-3 w-full lg:w-auto">
+              <div className="relative flex-1 min-w-[200px]">
+                <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                <input
+                  type="text"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  placeholder="Buscar por producto, código o moderador"
+                  className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-xl"
+                />
               </div>
-              <div className="bg-blue-50 rounded-lg p-3 text-center border border-blue-200">
-                <p className="text-lg font-bold text-blue-600">{grupos.filter(g => g.estado === 'en_revision').length}</p>
-                <p className="text-xs text-blue-700 font-semibold">En revisión</p>
-              </div>
-              <div className="bg-green-50 rounded-lg p-3 text-center border border-green-200">
-                <p className="text-lg font-bold text-green-600">{grupos.filter(g => g.estado === 'resuelto').length}</p>
-                <p className="text-xs text-green-700 font-semibold">Resueltos</p>
+              <div className="relative">
+                <FiChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                <select
+                  value={priorityFilter}
+                  onChange={(e) => setPriorityFilter(e.target.value)}
+                  className="appearance-none border border-gray-300 rounded-xl px-4 py-2 pr-10"
+                >
+                  <option value="todos">Todas las prioridades</option>
+                  <option value="alta">Alta</option>
+                  <option value="media">Media</option>
+                  <option value="baja">Baja</option>
+                </select>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Lista agrupada por producto */}
-        <div className="space-y-4">
-          {gruposFiltrados.length === 0 ? (
-            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
-              <FiAlertTriangle className="text-5xl text-gray-300 mx-auto mb-3" />
-              <p className="text-gray-500 font-semibold">No hay incidencias que coincidan con los filtros</p>
-            </div>
-          ) : (
-            gruposFiltrados.map(entry => (
-              <div key={entry.id} className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden hover:shadow-md transition-shadow">
-                {/* Encabezado */}
-                <div
-                  className="p-6 cursor-pointer hover:bg-gray-50 transition"
-                  onClick={() => setSelectedGroupId(selectedGroupId === entry.id ? null : entry.id)}
-                >
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-3 mb-3 flex-wrap">
-                        <span className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold border ${getEstadoColor(entry.estado)}`}>
-                          {entry.estado === 'pendiente' && <FiClock />}
-                          {entry.estado === 'en_revision' && <FiEye />}
-                          {entry.estado === 'resuelto' && <MdVerified />}
-                          {entry.estado.toUpperCase()}
-                        </span>
-                        {entry.incidencias.length > 0 && (
-                          <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-800">
-                            <FiAlertTriangle /> {entry.incidencias.length} incidencia(s)
-                          </span>
-                        )}
-                        {entry.reportes.length > 0 && (
-                          <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold bg-orange-100 text-orange-800">
-                            <FiAlertTriangle /> {entry.reportes.length} reporte(s)
-                          </span>
-                        )}
-                        <span className="text-xs text-gray-500">{formatDate(entry.fecha_ultima)}</span>
-                      </div>
-                      <h3 className="text-lg font-bold text-gray-900">PROD-{entry.id} - {entry.producto.titulo}</h3>
-                      <p className="text-sm text-gray-600 mt-1">
-                        {entry.incidencias[0]?.descripcion || entry.reportes[0]?.descripcion || ''}
-                      </p>
-                      <div className="flex items-center gap-6 text-sm text-gray-600 mt-3 flex-wrap">
-                        <span>Vendedor: <span className="font-bold text-gray-900">{entry.producto.vendedor}</span></span>
-                      </div>
-                    </div>
-                    <FiChevronDown className={`text-2xl text-gray-400 transition-transform flex-shrink-0 ${selectedGroupId === entry.id ? 'rotate-180' : ''}`} />
-                  </div>
-                </div>
-
-                {/* Detalles expandibles */}
-                {selectedGroupId === entry.id && (
-                  <div className="border-t border-gray-200 p-6 bg-gray-50">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-                      {/* Información del producto */}
-                      <div>
-                        <h4 className="font-bold text-gray-900 mb-4">Información del Producto</h4>
-                        <div className="space-y-3 text-sm">
-                          <div>
-                            <p className="text-gray-600 font-semibold">Precio</p>
-                            <p className="text-gray-900">${entry.producto.precio}</p>
-                          </div>
-                          <div>
-                            <p className="text-gray-600 font-semibold">Vendedor</p>
-                            <p className="text-gray-900">{entry.producto.vendedor}</p>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Información agrupada */}
-                      <div>
-                        <h4 className="font-bold text-gray-900 mb-4">Detalles</h4>
-                        <div className="space-y-3 text-sm">
-                          <div className="grid grid-cols-2 gap-3">
-                            <div className="bg-red-50 rounded-lg p-3 border border-red-200 text-red-800 font-semibold">Incidencias: {entry.incidencias.length}</div>
-                            <div className="bg-orange-50 rounded-lg p-3 border border-orange-200 text-orange-800 font-semibold">Reportes: {entry.reportes.length}</div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Acciones generales */}
-                    <div className="mb-6">
-                      <button
-                        onClick={() => navigate(`/producto/${entry.producto.id}`)}
-                        className="px-4 py-2 border-2 border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 font-semibold flex items-center gap-2"
-                      >
-                        <FiEye /> Ver producto
-                      </button>
-                    </div>
-
-                    {/* Listado de incidencias y reportes */}
-                    {entry.incidencias.length > 0 && (
-                      <div className="mb-6 pb-6 border-b border-gray-300">
-                        <h4 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
-                          <FiAlertTriangle /> Incidencias automáticas
-                        </h4>
-                        <div className="space-y-3">
-                          {entry.incidencias.map(inc => (
-                            <div key={`inc-${inc.id}`} className="bg-white rounded-lg p-4 border border-blue-200">
-                              <div className="flex justify-between items-center">
-                                <div>
-                                  <p className="text-sm text-gray-700 mb-1">{inc.descripcion}</p>
-                                  <p className="text-xs text-gray-500">Estado: <span className="font-semibold">{inc.estado}</span> · {formatDate(inc.fecha_incidencia)}</p>
-                                </div>
-                                <div className="flex gap-2">
-                                  {inc.estado === 'pendiente' && (
-                                    <button
-                                      onClick={() => asignarIncidencia(inc)}
-                                      disabled={!puedeTomarMas}
-                                      className={`px-3 py-1.5 rounded-lg text-sm font-semibold ${
-                                        puedeTomarMas ? 'bg-orange-500 hover:bg-orange-600 text-white' : 'bg-gray-300 text-gray-600 cursor-not-allowed'
-                                      }`}
-                                    >
-                                      Tomar
-                                    </button>
-                                  )}
-                                  {/* Editar/Eliminar incidencia */}
-                                  <button
-                                    onClick={() => {
-                                      setModalData({
-                                        isOpen: true,
-                                        type: 'confirm',
-                                        title: 'Editar Incidencia',
-                                        message: '¿Deseas actualizar la descripción de esta incidencia?',
-                                        onConfirm: async () => {
-                                          try {
-                                            await incidenceAPI.update(inc.id, {
-                                              id: inc.id,
-                                              dateIncidence: inc.date_incidence_raw || inc.fecha_incidencia,
-                                              description: decisionReason || inc.descripcion,
-                                              status: inc.estado === 'en_revision' ? 'in_review' : (inc.estado === 'pendiente' ? 'pending' : (inc.estado === 'suspendido' ? 'suspended' : 'resolved')),
-                                              userId: inc.user_id || inc.vendedor_id || 0,
-                                              moderatorId: inc.moderador_id || 0,
-                                              productId: inc.product_id
-                                            });
-                                            // Actualizar estado local
-                                            setGrupos(prev => prev.map(g => g.id === entry.id ? {
-                                              ...g,
-                                              incidencias: g.incidencias.map(i => i.id === inc.id ? { ...i, descripcion: decisionReason || i.descripcion } : i)
-                                            } : g));
-                                            setModalData({ isOpen: true, type: 'success', title: 'Incidencia Actualizada', message: 'Se actualizó la incidencia correctamente', confirmText: 'Entendido' });
-                                          } catch {
-                                            setModalData({ isOpen: true, type: 'error', title: 'Error', message: 'No se pudo actualizar la incidencia', confirmText: 'Cerrar' });
-                                          }
-                                        },
-                                        confirmText: 'Actualizar',
-                                        cancelText: 'Cancelar'
-                                      });
-                                    }}
-                                    className="px-3 py-1.5 border-2 border-blue-300 text-blue-700 rounded-lg hover:bg-blue-50 font-semibold text-sm"
-                                  >
-                                    Guardar
-                                  </button>
-                                  <button
-                                    onClick={() => {
-                                      setModalData({
-                                        isOpen: true,
-                                        type: 'confirm',
-                                        title: 'Eliminar Incidencia',
-                                        message: '¿Estás seguro de eliminar esta incidencia? Esta acción no se puede deshacer.',
-                                        onConfirm: async () => {
-                                          try {
-                                            await incidenceAPI.remove(inc.id);
-                                            setGrupos(prev => prev.map(g => g.id === entry.id ? { ...g, incidencias: g.incidencias.filter(i => i.id !== inc.id) } : g));
-                                            setModalData({ isOpen: true, type: 'success', title: 'Eliminada', message: 'Incidencia eliminada correctamente', confirmText: 'Entendido' });
-                                          } catch {
-                                            setModalData({ isOpen: true, type: 'error', title: 'Error', message: 'No se pudo eliminar la incidencia', confirmText: 'Cerrar' });
-                                          }
-                                        },
-                                        confirmText: 'Eliminar',
-                                        cancelText: 'Cancelar'
-                                      });
-                                    }}
-                                    className="px-3 py-1.5 bg-red-500 hover:bg-red-600 text-white font-semibold rounded-lg text-sm"
-                                  >
-                                    Eliminar
-                                  </button>
-                                </div>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {entry.reportes.length > 0 && (
-                      <div className="mt-6 flex flex-col gap-3 border-b border-gray-300 pb-6">
-                        <h4 className="font-bold text-gray-900 mb-1 flex items-center gap-2">
-                          <FiAlertTriangle /> Reportes de usuarios
-                        </h4>
-                        {entry.reportes.map(rep => (
-                          <div key={`rep-${rep.id}`} className="bg-white rounded-lg p-4 border border-orange-200">
-                            <div className="flex justify-between items-center">
-                              <div>
-                                <p className="text-sm text-gray-700 mb-1">{rep.descripcion}</p>
-                                <p className="text-xs text-gray-500">{formatDate(rep.fecha_incidencia)}</p>
-                              </div>
-                              <button
-                                onClick={() => {
-                                  setModalData({
-                                    isOpen: true,
-                                    type: 'confirm',
-                                    title: 'Eliminar Reporte',
-                                    message: '¿Estás seguro de eliminar este reporte? Esta acción no se puede deshacer.',
-                                    onConfirm: async () => {
-                                      try {
-                                        await reportAPI.remove(rep.id);
-                                        setGrupos(prev => prev.map(g => g.id === entry.id ? { ...g, reportes: g.reportes.filter(r => r.id !== rep.id) } : g));
-                                        setModalData({ isOpen: true, type: 'success', title: 'Reporte Eliminado', message: 'Reporte eliminado correctamente', confirmText: 'Entendido' });
-                                      } catch {
-                                        setModalData({ isOpen: true, type: 'error', title: 'Error', message: 'No se pudo eliminar el reporte', confirmText: 'Cerrar' });
-                                      }
-                                    },
-                                    confirmText: 'Eliminar',
-                                    cancelText: 'Cancelar'
-                                  });
-                                }}
-                                className="px-3 py-1.5 bg-red-500 hover:bg-red-600 text-white font-semibold rounded-lg text-sm"
-                              >
-                                Eliminar Reporte
-                              </button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {/* Decisión a nivel de producto (opcional): usar el primer elemento en revisión si existe */}
-                    {(() => {
-                      const incEnRevision = entry.incidencias.find(i => i.estado === 'en_revision');
-                      if (!incEnRevision) return null;
-                      return (
-                        <div className="mb-6 pb-6 border-b border-gray-300">
-                          <h4 className="font-bold text-gray-900 mb-4">Tomar Decisión</h4>
-                          <textarea
-                            value={decisionReason}
-                            onChange={(e) => setDecisionReason(e.target.value)}
-                            placeholder="Razón de tu decisión..."
-                            className="w-full px-4 py-2 border border-gray-300 rounded-lg mb-4 resize-none"
-                            rows="3"
-                          />
-                          <div className="flex flex-wrap gap-3">
-                            <button
-                              onClick={() => resolverIncidencia(incEnRevision, 'aprobar')}
-                              className="flex-1 min-w-[150px] py-2 px-4 bg-green-500 hover:bg-green-600 text-white font-semibold rounded-lg transition"
-                            >
-                              <MdVerified className="inline mr-2" />
-                              Aprobar
-                            </button>
-                            <button
-                              onClick={() => resolverIncidencia(incEnRevision, 'rechazar')}
-                              className="flex-1 min-w-[150px] py-2 px-4 bg-red-500 hover:bg-red-600 text-white font-semibold rounded-lg transition"
-                            >
-                              <MdBlock className="inline mr-2" />
-                              Rechazar
-                            </button>
-                            <button
-                              onClick={() => resolverIncidencia(incEnRevision, 'suspender')}
-                              className="flex-1 min-w-[150px] py-2 px-4 bg-purple-500 hover:bg-purple-600 text-white font-semibold rounded-lg transition"
-                            >
-                              <FiAlertTriangle className="inline mr-2" />
-                              Suspender
-                            </button>
-                            {userRole === 'Admin' && (
-                              <button
-                                onClick={() => reasignarIncidencia(incEnRevision)}
-                                className="flex-1 min-w-[150px] py-2 px-4 bg-purple-500 hover:bg-purple-600 text-white font-semibold rounded-lg transition"
-                              >
-                                🔄 Reasignar
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })()}
-
-                    {/* Nota: el botón de tomar está ahora junto a cada incidencia pendiente */}
-
-                    {/* Estado resuelto (nivel de grupo) */}
-                    {entry.estado === 'resuelto' && (
-                      <div className="bg-green-50 rounded-lg p-4 border border-green-200">
-                        <p className="text-sm text-gray-700">
-                          <span className="font-semibold">Decisión Final:</span>
-                          <span className="ml-2 font-bold text-green-600">Resuelto</span>
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            ))
-          )}
-        </div>
+        {renderContent()}
       </div>
 
-      {/* Modal */}
       <Modal
         isOpen={modalData.isOpen}
         type={modalData.type}
         title={modalData.title}
         message={modalData.message}
         onConfirm={modalData.onConfirm}
-        confirmText={modalData.confirmText || 'Confirmar'}
+        confirmText={modalData.confirmText || "Confirmar"}
         cancelText={modalData.cancelText}
-        onCancel={() => setModalData({ ...modalData, isOpen: false })}
-        onClose={() => setModalData({ ...modalData, isOpen: false })}
+        onCancel={modalData.onCancel || closeModal}
+        onClose={closeModal}
       />
     </div>
   );

@@ -1,22 +1,32 @@
-import { Link, useNavigate } from 'react-router-dom';
-import { useState, useEffect } from 'react';
-import { authAPI, API_BASE_URL } from '../../services/api';
-import logo from '../../assets/Logo de Shop&Buy.png';
+import { useEffect, useState } from "react";
 import {
-  FiSearch, FiUser, FiPackage, FiHeart, FiMessageSquare, FiLogOut,
-  FiMenu, FiX, FiAlertTriangle, FiUsers, FiBarChart2, FiUserCheck
-} from 'react-icons/fi';
-import NotificationIcon from './NotificationIcon';
-import useNotifications from '../../hooks/useNotifications';
-import { useWebSocket } from '../../hooks/useWebSocket';
-import { normalizeRole, ROLES } from '../../config/roles';
+  FiAlertTriangle,
+  FiBarChart2,
+  FiHeart,
+  FiLogOut,
+  FiMenu,
+  FiMessageSquare,
+  FiPackage,
+  FiSearch,
+  FiUser,
+  FiUserCheck,
+  FiUsers,
+  FiX,
+} from "react-icons/fi";
+import { Link, useNavigate } from "react-router-dom";
+import logo from "../../assets/Logo de Shop&Buy.png";
+import { normalizeRole, obtenerPermisos, ROLES } from "../../config/roles";
+import useNotifications from "../../hooks/useNotifications";
+import { useWebSocket } from "../../hooks/useWebSocket";
+import { API_BASE_URL, authAPI } from "../../services/api";
+import NotificationIcon from "./NotificationIcon";
 
 function Header() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [userData, setUserData] = useState(null);
   const [showDropdown, setShowDropdown] = useState(false);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
-  const [searchTerm, setSearchTerm] = useState('');
+  const [searchTerm, setSearchTerm] = useState("");
   const navigate = useNavigate();
 
   useNotifications();
@@ -46,8 +56,9 @@ function Header() {
       }
     };
 
-    window.addEventListener('userDataUpdated', handleUserDataUpdate);
-    return () => window.removeEventListener('userDataUpdated', handleUserDataUpdate);
+    window.addEventListener("userDataUpdated", handleUserDataUpdate);
+    return () =>
+      window.removeEventListener("userDataUpdated", handleUserDataUpdate);
   }, []);
 
   useEffect(() => {
@@ -65,16 +76,16 @@ function Header() {
 
   useEffect(() => {
     const handleClickOutside = (event) => {
-      if (showDropdown && !event.target.closest('.user-dropdown')) {
+      if (showDropdown && !event.target.closest(".user-dropdown")) {
         setShowDropdown(false);
       }
-      if (showMobileMenu && !event.target.closest('.mobile-menu-container')) {
+      if (showMobileMenu && !event.target.closest(".mobile-menu-container")) {
         setShowMobileMenu(false);
       }
     };
 
-    document.addEventListener('click', handleClickOutside);
-    return () => document.removeEventListener('click', handleClickOutside);
+    document.addEventListener("click", handleClickOutside);
+    return () => document.removeEventListener("click", handleClickOutside);
   }, [showDropdown, showMobileMenu]);
 
   const handleLogout = () => {
@@ -83,18 +94,22 @@ function Header() {
     setUserData(null);
     setShowDropdown(false);
     setShowMobileMenu(false);
-    window.location.href = '/';
+    window.location.href = "/";
   };
 
   const getAvatarUrl = (user) => {
     if (!user) return null;
-    const cacheBuster = user.updatedAt ? `?v=${new Date(user.updatedAt).getTime()}` : `?v=${Date.now()}`;
+    const cacheBuster = user.updatedAt
+      ? `?v=${new Date(user.updatedAt).getTime()}`
+      : `?v=${Date.now()}`;
 
-    if (user.avatarUrl?.startsWith('data:')) return user.avatarUrl;
+    if (user.avatarUrl?.startsWith("data:")) return user.avatarUrl;
     if (user.avatarUrl?.startsWith(API_BASE_URL)) {
-      return user.avatarUrl.includes('?') ? user.avatarUrl : `${user.avatarUrl}${cacheBuster}`;
+      return user.avatarUrl.includes("?")
+        ? user.avatarUrl
+        : `${user.avatarUrl}${cacheBuster}`;
     }
-    if (user.avatarUrl?.startsWith('/')) {
+    if (user.avatarUrl?.startsWith("/")) {
       return `${API_BASE_URL}${user.avatarUrl}${cacheBuster}`;
     }
     if (user.dni) {
@@ -104,41 +119,100 @@ function Header() {
   };
 
   const getUserRole = (user) => {
-    if (!user) return 'Usuario';
-    if (user.roles && Array.isArray(user.roles)) return user.roles[0] || 'Usuario';
+    if (!user) return ROLES.USUARIO;
+
+    const resolveRoleValue = (value) => normalizeRole(value) || null;
+
+    const pickFromCollection = (collection) => {
+      if (!Array.isArray(collection) || collection.length === 0) return null;
+
+      for (const entry of collection) {
+        const normalized = resolveRoleValue(entry);
+        if (normalized) return normalized;
+
+        if (entry?.role) {
+          const nested = resolveRoleValue(entry.role);
+          if (nested) return nested;
+        }
+
+        if (entry?.Role) {
+          const nested = resolveRoleValue(entry.Role);
+          if (nested) return nested;
+        }
+      }
+
+      return null;
+    };
+
+    const roleFromRoles = pickFromCollection(user.roles);
+    if (roleFromRoles) return roleFromRoles;
+
+    const roleFromUpperRoles = pickFromCollection(user.Roles);
+    if (roleFromUpperRoles) return roleFromUpperRoles;
+
+    const roleFromUserRoles = pickFromCollection(
+      user.user_roles || user.UserRoles
+    );
+    if (roleFromUserRoles) return roleFromUserRoles;
+
+    const roleFromAuthorities = pickFromCollection(
+      user.authorities || user.Authorities
+    );
+    if (roleFromAuthorities) return roleFromAuthorities;
+
+    if (user.role) {
+      return resolveRoleValue(user.role);
+    }
+
+    if (user.Role) {
+      return resolveRoleValue(user.Role);
+    }
+
+    if (user.roleId || user.role_id) {
+      const resolved = resolveRoleValue(user.roleId || user.role_id);
+      if (resolved) return resolved;
+    }
 
     if (authAPI.isAuthenticated()) {
       try {
         const token = document.cookie.match(/authToken=([^;]+)/)?.[1];
         if (token) {
-          const payload = JSON.parse(atob(token.split('.')[1]));
-          return payload.roles?.[0] || 'Usuario';
+          const payload = JSON.parse(atob(token.split(".")[1]));
+          if (payload.roles?.length) {
+            const resolved = resolveRoleValue(payload.roles[0]);
+            if (resolved) return resolved;
+          }
+          if (payload.authorities?.length) {
+            const resolved = resolveRoleValue(payload.authorities[0]);
+            if (resolved) return resolved;
+          }
         }
       } catch {
-          // Error decoding token
-        }
+        // Error decoding token
+      }
     }
-    return user.role || 'Usuario';
+
+    return ROLES.USUARIO;
   };
 
   const getUserName = (user) => {
-    if (!user) return 'Usuario';
-    if (user.name) return `${user.name} ${user.lastname || ''}`.trim();
+    if (!user) return "Usuario";
+    if (user.name) return `${user.name} ${user.lastname || ""}`.trim();
 
     if (authAPI.isAuthenticated()) {
       try {
         const token = document.cookie.match(/authToken=([^;]+)/)?.[1];
         if (token) {
-          const payload = JSON.parse(atob(token.split('.')[1]));
-          if (payload.email) return payload.email.split('@')[0];
+          const payload = JSON.parse(atob(token.split(".")[1]));
+          if (payload.email) return payload.email.split("@")[0];
         }
       } catch {
-          // Error decoding token
-        }
+        // Error decoding token
+      }
     }
 
-    if (user.email) return user.email.split('@')[0];
-    return 'Usuario';
+    if (user.email) return user.email.split("@")[0];
+    return "Usuario";
   };
 
   const handleSearch = (e) => {
@@ -146,7 +220,7 @@ function Header() {
     if (searchTerm.trim()) {
       navigate(`/productos?search=${encodeURIComponent(searchTerm.trim())}`);
     } else {
-      navigate('/productos');
+      navigate("/productos");
     }
   };
 
@@ -154,31 +228,67 @@ function Header() {
     const r = normalizeRole(role);
     if (r === ROLES.USUARIO) {
       return [
-        { label: 'Mi Perfil', to: '/mi-perfil', icon: FiUser },
-        { label: 'Mis Productos', to: '/mis-productos', icon: FiPackage },
-        { label: 'Favoritos', to: '/favoritos', icon: FiHeart },
-        { label: 'Mis Mensajes', to: '/chat', icon: FiMessageSquare },
+        { label: "Mi Perfil", to: "/mi-perfil", icon: FiUser },
+        { label: "Mis Productos", to: "/mis-productos", icon: FiPackage },
+        { label: "Favoritos", to: "/favoritos", icon: FiHeart },
+        { label: "Mis Mensajes", to: "/chat", icon: FiMessageSquare },
       ];
     }
 
-    if (r === ROLES.MODERADOR) {
-      return [
-        { label: 'Gestionar Incidencias', to: '/admin/incidencias', icon: FiAlertTriangle, section: 'moderacion' },
-        { label: 'Gestionar Usuarios', to: '/admin/usuarios', icon: FiUsers, section: 'moderacion' },
-        { label: 'Gestionar Productos', to: '/admin/productos', icon: FiPackage, section: 'moderacion' },
-        { label: 'Revisar Apelaciones', to: '/admin/incidencias', icon: FiAlertTriangle, section: 'moderacion' },
-        { label: 'Panel de Admin', to: '/admin', icon: FiBarChart2, isAdmin: true },
+    if (r === ROLES.MODERADOR || r === ROLES.ADMIN) {
+      const permisos = obtenerPermisos(r) || {};
+      const adminLinks = [
+        {
+          label: "Gestionar Incidencias",
+          to: "/admin/incidencias",
+          icon: FiAlertTriangle,
+          section: "moderacion",
+          permission: "gestionar_incidencias",
+        },
+        {
+          label: "Gestionar Usuarios",
+          to: "/admin/usuarios",
+          icon: FiUsers,
+          section: "moderacion",
+          permission: "gestionar_usuarios",
+        },
+        {
+          label: "Gestionar Productos",
+          to: "/admin/productos",
+          icon: FiPackage,
+          section: "moderacion",
+          permission: "gestionar_productos_admin",
+        },
+        {
+          label: "Revisar Apelaciones",
+          to: "/admin/incidencias?tab=apelaciones",
+          icon: FiAlertTriangle,
+          section: "moderacion",
+          permission: "ver_apelaciones",
+        },
+        {
+          label: "Registrar Moderadores",
+          to: "/admin/moderadores",
+          icon: FiUserCheck,
+          section: "admin",
+          permission: "registrar_moderadores",
+        },
       ];
-    }
-    if (r === ROLES.ADMIN) {
-      return [
-        { label: 'Gestionar Incidencias', to: '/admin/incidencias', icon: FiAlertTriangle, section: 'moderacion' },
-        { label: 'Gestionar Usuarios', to: '/admin/usuarios', icon: FiUsers, section: 'moderacion' },
-        { label: 'Gestionar Productos', to: '/admin/productos', icon: FiPackage, section: 'moderacion' },
-        { label: 'Revisar Apelaciones', to: '/admin/incidencias', icon: FiAlertTriangle, section: 'moderacion' },
-        { label: 'Registrar Moderadores', to: '/admin/moderadores', icon: FiUserCheck, section: 'admin' },
-        { label: 'Panel de Admin', to: '/admin', icon: FiBarChart2, isAdmin: true },
-      ];
+
+      const filtered = adminLinks.filter(
+        (link) => !link.permission || permisos[link.permission]
+      );
+
+      if (permisos.acceso_admin_panel) {
+        filtered.push({
+          label: "Panel de Admin",
+          to: "/admin",
+          icon: FiBarChart2,
+          isAdmin: true,
+        });
+      }
+
+      return filtered;
     }
 
     return [];
@@ -190,11 +300,14 @@ function Header() {
 
   return (
     <header className="sticky top-0 z-50 shadow-lg">
-      <div style={{ backgroundColor: '#CF5C36' }}>
+      <div style={{ backgroundColor: "#CF5C36" }}>
         <div className="sb-container py-4">
           <div className="flex flex-col lg:flex-row items-center gap-4 lg:gap-6">
             {/* Logo and Brand */}
-            <Link to="/" className="flex items-center gap-3 group flex-shrink-0">
+            <Link
+              to="/"
+              className="flex items-center gap-3 group flex-shrink-0"
+            >
               <div className="relative">
                 <img
                   src={logo}
@@ -204,12 +317,17 @@ function Header() {
               </div>
               <div className="text-white">
                 <h1 className="font-black text-xl tracking-tight">Shop&Buy</h1>
-                <p className="text-xs opacity-90 -mt-1">Compra • Vende • Descubre</p>
+                <p className="text-xs opacity-90 -mt-1">
+                  Compra • Vende • Descubre
+                </p>
               </div>
             </Link>
 
             {/* Search Bar - Desktop */}
-            <form onSubmit={handleSearch} className="flex-1 max-w-3xl w-full hidden sm:block">
+            <form
+              onSubmit={handleSearch}
+              className="flex-1 max-w-3xl w-full hidden sm:block"
+            >
               <div className="relative">
                 <FiSearch className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400 text-xl" />
                 <input
@@ -232,10 +350,16 @@ function Header() {
             <div className="flex items-center gap-3 lg:gap-6 flex-shrink-0 w-full sm:w-auto justify-between sm:justify-end">
               {/* Desktop Navigation */}
               <nav className="hidden xl:flex items-center gap-4">
-                <Link to="/productos" className="text-white hover:text-yellow-200 font-medium transition-colors text-sm whitespace-nowrap">
+                <Link
+                  to="/productos"
+                  className="text-white hover:text-yellow-200 font-medium transition-colors text-sm whitespace-nowrap"
+                >
                   Explorar
                 </Link>
-                <Link to="/categorias" className="text-white hover:text-yellow-200 font-medium transition-colors text-sm whitespace-nowrap">
+                <Link
+                  to="/categorias"
+                  className="text-white hover:text-yellow-200 font-medium transition-colors text-sm whitespace-nowrap"
+                >
                   Categorías
                 </Link>
               </nav>
@@ -276,8 +400,16 @@ function Header() {
                       </div>
 
                       <div className="text-white/70">
-                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                          <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
+                        <svg
+                          className="w-4 h-4"
+                          fill="currentColor"
+                          viewBox="0 0 20 20"
+                        >
+                          <path
+                            fillRule="evenodd"
+                            d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
+                            clipRule="evenodd"
+                          />
                         </svg>
                       </div>
                     </button>
@@ -286,28 +418,48 @@ function Header() {
                     {showDropdown && (
                       <div className="absolute right-0 top-full mt-2 w-64 bg-white rounded-xl shadow-2xl border border-gray-100 py-2 z-50 overflow-hidden">
                         <div className="px-4 py-3 border-b border-gray-100 bg-gradient-to-r from-orange-50 to-white">
-                          <p className="font-bold text-gray-900">{getUserName(userData)}</p>
+                          <p className="font-bold text-gray-900">
+                            {getUserName(userData)}
+                          </p>
                           <p className="text-xs text-gray-600">{userRole}</p>
                         </div>
 
                         <div className="py-2">
                           {menuOptions.map((option, index) => {
                             const Icon = option.icon;
-                            const prevOption = index > 0 ? menuOptions[index - 1] : null;
-                            const showSectionDivider = prevOption && option.section && prevOption.section !== option.section;
+                            const prevOption =
+                              index > 0 ? menuOptions[index - 1] : null;
+                            const showSectionDivider =
+                              prevOption &&
+                              option.section &&
+                              prevOption.section !== option.section;
 
                             return (
-                              <div key={option.to}>
-                                {showSectionDivider && <div className="border-t border-gray-100 my-1"></div>}
+                              <div
+                                key={option.key || option.to || option.label}
+                              >
+                                {showSectionDivider && (
+                                  <div className="border-t border-gray-100 my-1"></div>
+                                )}
                                 <Link
                                   to={option.to}
                                   className={`flex items-center gap-3 px-4 py-3 hover:bg-orange-50 transition-colors group ${
-                                    option.isAdmin ? 'border-t border-gray-100 text-orange-600 font-semibold' : 'text-gray-700'
+                                    option.isAdmin
+                                      ? "border-t border-gray-100 text-orange-600 font-semibold"
+                                      : "text-gray-700"
                                   }`}
                                   onClick={() => setShowDropdown(false)}
                                 >
-                                  <Icon className={`w-5 h-5 ${option.isAdmin ? 'text-orange-600' : 'text-gray-400 group-hover:text-orange-600'}`} />
-                                  <span className="font-medium">{option.label}</span>
+                                  <Icon
+                                    className={`w-5 h-5 ${
+                                      option.isAdmin
+                                        ? "text-orange-600"
+                                        : "text-gray-400 group-hover:text-orange-600"
+                                    }`}
+                                  />
+                                  <span className="font-medium">
+                                    {option.label}
+                                  </span>
                                 </Link>
                               </div>
                             );
@@ -355,13 +507,19 @@ function Header() {
                                 />
                               ) : (
                                 <div className="w-full h-full flex items-center justify-center text-orange-600 text-lg font-bold">
-                                  {getUserName(userData).charAt(0).toUpperCase()}
+                                  {getUserName(userData)
+                                    .charAt(0)
+                                    .toUpperCase()}
                                 </div>
                               )}
                             </div>
                             <div>
-                              <p className="font-bold text-gray-900">{getUserName(userData)}</p>
-                              <p className="text-xs text-gray-600">{userRole}</p>
+                              <p className="font-bold text-gray-900">
+                                {getUserName(userData)}
+                              </p>
+                              <p className="text-xs text-gray-600">
+                                {userRole}
+                              </p>
                             </div>
                           </div>
                         </div>
@@ -369,21 +527,39 @@ function Header() {
                         <div className="py-2">
                           {menuOptions.map((option, index) => {
                             const Icon = option.icon;
-                            const prevOption = index > 0 ? menuOptions[index - 1] : null;
-                            const showSectionDivider = prevOption && option.section && prevOption.section !== option.section;
+                            const prevOption =
+                              index > 0 ? menuOptions[index - 1] : null;
+                            const showSectionDivider =
+                              prevOption &&
+                              option.section &&
+                              prevOption.section !== option.section;
 
                             return (
-                              <div key={option.to}>
-                                {showSectionDivider && <div className="border-t border-gray-100 my-1"></div>}
+                              <div
+                                key={option.key || option.to || option.label}
+                              >
+                                {showSectionDivider && (
+                                  <div className="border-t border-gray-100 my-1"></div>
+                                )}
                                 <Link
                                   to={option.to}
                                   className={`flex items-center gap-3 px-4 py-3 hover:bg-orange-50 transition-colors group ${
-                                    option.isAdmin ? 'border-t border-gray-100 text-orange-600 font-semibold' : 'text-gray-700'
+                                    option.isAdmin
+                                      ? "border-t border-gray-100 text-orange-600 font-semibold"
+                                      : "text-gray-700"
                                   }`}
                                   onClick={() => setShowMobileMenu(false)}
                                 >
-                                  <Icon className={`w-5 h-5 flex-shrink-0 ${option.isAdmin ? 'text-orange-600' : 'text-gray-400 group-hover:text-orange-600'}`} />
-                                  <span className="font-medium">{option.label}</span>
+                                  <Icon
+                                    className={`w-5 h-5 flex-shrink-0 ${
+                                      option.isAdmin
+                                        ? "text-orange-600"
+                                        : "text-gray-400 group-hover:text-orange-600"
+                                    }`}
+                                  />
+                                  <span className="font-medium">
+                                    {option.label}
+                                  </span>
                                 </Link>
                               </div>
                             );
@@ -414,7 +590,7 @@ function Header() {
                   <Link
                     to="/register"
                     className="px-5 py-2 bg-white text-orange-600 font-semibold rounded-lg hover:bg-gray-50 transition-colors shadow-md text-sm"
-                    style={{ color: '#CF5C36' }}
+                    style={{ color: "#CF5C36" }}
                   >
                     Registrarse
                   </Link>
@@ -425,7 +601,10 @@ function Header() {
 
           {/* Mobile Search Bar */}
           {isLoggedIn && (
-            <form onSubmit={handleSearch} className="block sm:hidden mt-4 w-full">
+            <form
+              onSubmit={handleSearch}
+              className="block sm:hidden mt-4 w-full"
+            >
               <div className="relative">
                 <FiSearch className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400 text-xl" />
                 <input
@@ -451,4 +630,3 @@ function Header() {
 }
 
 export default Header;
-
