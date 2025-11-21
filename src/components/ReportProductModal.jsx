@@ -112,7 +112,7 @@ function ReportProductModal({ isOpen, onClose, productId, productTitle }) {
     <>
       {/* Modal Principal de Reporte */}
       <div
-        className={`fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center transition-opacity duration-300 ${
+        className={`fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center transition-opacity duration-300 ${
           isOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'
         }`}
         onClick={onClose}
@@ -239,7 +239,7 @@ function ReportProductModal({ isOpen, onClose, productId, productTitle }) {
 
       {/* Modal de Éxito */}
       {successModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center">
           <div className="bg-white rounded-3xl shadow-2xl p-8 max-w-md text-center animate-in fade-in zoom-in duration-300">
             <div className="flex justify-center mb-4">
               <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center">

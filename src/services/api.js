@@ -475,6 +475,41 @@ export const ratingAPI = {
   rateSeller: async (sellerId, { score, comment }) => {
     const response = await api.post(`/ratings/${sellerId}`, { score, comment });
     return response.data;
+  },
+  
+  // Enviar calificación desde el chat
+  submitRatingFromChat: async (conversationId, sellerId, score, comment) => {
+    const response = await api.post('/ratings/chat/submit', {
+      conversationId,
+      sellerId,
+      score,
+      comment
+    });
+    return response.data;
+  },
+  
+  // Crear o actualizar calificación
+  upsertRating: async (sellerId, score, comment) => {
+    const response = await api.post(`/ratings/${sellerId}`, {
+      score,
+      comment
+    });
+    return response.data;
+  },
+  
+  // Actualizar calificación existente
+  updateRating: async (sellerId, score, comment) => {
+    const response = await api.put(`/ratings/${sellerId}`, {
+      score,
+      comment
+    });
+    return response.data;
+  },
+  
+  // Eliminar calificación
+  deleteRating: async (sellerId) => {
+    const response = await api.delete(`/ratings/${sellerId}`);
+    return response.data;
   }
 };
 
@@ -643,5 +678,6 @@ export const reportAPI = {
     return response.data;
   }
 };
+
 
 export default api;

@@ -18,7 +18,6 @@ import {
   conversationAPI, 
   authAPI, 
   favoriteAPI,
-  ratingAPI,
   API_BASE_URL
 } from '../services/api';
 import { normalizeRole, ROLES } from '../config/roles';
@@ -49,9 +48,7 @@ function ProductoDetallePage() {
   const [contactingVendor, setContactingVendor] = useState(false);
   const [isFavorite, setIsFavorite] = useState(false);
   const [favoriteLoading, setFavoriteLoading] = useState(false);
-  const [rating, setRating] = useState(0);
-  const [ratingComment, setRatingComment] = useState('');
-  const [ratingSubmitting, setRatingSubmitting] = useState(false);
+  
 
   useEffect(() => {
     const fetchProduct = async () => {
@@ -225,48 +222,6 @@ function ProductoDetallePage() {
     }
   };
 
-  // Enviar calificación del vendedor
-  const handleSubmitRating = async () => {
-    try {
-      if (!authAPI.isAuthenticated()) {
-        navigate('/login');
-        return;
-      }
-      if (!product?.sellerId) return;
-      if (rating <= 0 || rating > 5) {
-        alert('Selecciona una calificación entre 1 y 5');
-        return;
-      }
-      setRatingSubmitting(true);
-      await ratingAPI.rateSeller(product.sellerId, { score: Number(rating), comment: ratingComment || undefined });
-      // Opcional: refrescar datos del vendedor para ver rating actualizado
-      try {
-        const sellerData = await userAPI.getUserById(product.sellerId);
-        setProduct(prev => prev ? ({
-          ...prev,
-          seller: {
-            ...prev.seller,
-            rating: typeof sellerData.rating === 'number' ? sellerData.rating : (parseFloat(sellerData.rating) || prev.seller.rating || 0),
-            ratingCount: sellerData.ratingCount ?? prev.seller.ratingCount ?? 0,
-          }
-        }) : prev);
-      } catch {
-        // ignore
-      }
-      setRating(0);
-      setRatingComment('');
-      alert('¡Gracias por tu calificación!');
-    } catch (err) {
-      if (err?.response?.status === 401) {
-        navigate('/login');
-      } else {
-        const msg = err?.response?.data?.message || 'No se pudo enviar la calificación';
-        alert(msg);
-      }
-    } finally {
-      setRatingSubmitting(false);
-    }
-  };
 
   // Función para manejar favoritos
   const handleToggleFavorite = async () => {
@@ -688,38 +643,7 @@ function ProductoDetallePage() {
                       )}
                     </div>
                   </div>
-                  {/* Formulario simple de calificación */}
-                  <div className="mt-4 p-4 rounded-xl border-2 border-gray-200 bg-gray-50">
-                    <p className="font-semibold text-gray-900 mb-2">Calificar vendedor</p>
-                    <div className="flex items-center gap-2 mb-3">
-                      <select
-                        value={rating}
-                        onChange={(e) => setRating(Number(e.target.value))}
-                        className="px-3 py-2 border border-gray-300 rounded-lg"
-                      >
-                        <option value={0}>Selecciona</option>
-                        <option value={1}>1 ⭐</option>
-                        <option value={2}>2 ⭐⭐</option>
-                        <option value={3}>3 ⭐⭐⭐</option>
-                        <option value={4}>4 ⭐⭐⭐⭐</option>
-                        <option value={5}>5 ⭐⭐⭐⭐⭐</option>
-                      </select>
-                      <button
-                        onClick={handleSubmitRating}
-                        disabled={ratingSubmitting}
-                        className={`px-4 py-2 text-white font-bold rounded-lg ${ratingSubmitting ? 'bg-gray-400' : 'bg-orange-600 hover:bg-orange-700'} `}
-                      >
-                        {ratingSubmitting ? 'Enviando...' : 'Enviar'}
-                      </button>
-                    </div>
-                    <textarea
-                      value={ratingComment}
-                      onChange={(e) => setRatingComment(e.target.value)}
-                      placeholder="Comentario (opcional)"
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg resize-none"
-                      rows={2}
-                    />
-                  </div>
+                  
                 </div>
               </div>
 
