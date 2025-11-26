@@ -5,7 +5,7 @@ import { MdBlock, MdVerified } from 'react-icons/md';
 import usePageTitle from '../hooks/usePageTitle';
 import Modal from '../components/common/Modal';
 import { checkAdminAccess } from '../utils/rolePermissions';
-import { productAPI, categoryAPI, API_BASE_URL } from '../services/api';
+import { productAPI, categoryAPI, authAPI, reportAPI, incidenceAPI, API_BASE_URL } from '../services/api';
 
 // Sin datos estáticos: cargaremos desde la API
 
@@ -115,12 +115,16 @@ function GestionProductosPage() {
       isOpen: true,
       type: 'confirm',
       title: `${accion === 'activar' ? 'Activar' : 'Suspender'} Producto`,
-      message: `¿Estás seguro de ${accion} el producto "${producto.titulo}"?${accion === 'suspender' ? '\n\nEsta acción ocultará el producto de la plataforma.' : ''}`,
+      message: `¿Estás seguro de ${accion} el producto "${producto.titulo}"?${accion === 'suspender' ? '\n\nEsta acción:\n- Creará una incidencia pendiente automáticamente\n- Ocultará el producto de la plataforma\n- La incidencia aparecerá en "Incidencias pendientes"' : ''}`,
       onConfirm: async () => {
         try {
-          // Sincronizar con backend usando moderación (block/active)
-          const targetModeration = nuevoEstado === 'suspendido' ? 'block' : 'active';
+          // Cuando se suspende: usar 'review' para que aparezca en pendientes
+          // Cuando se activa: usar 'active' para resolver incidencias
+          const targetModeration = nuevoEstado === 'suspendido' ? 'review' : 'active';
+          
+          console.log(`Cambiando estado de producto ${producto.id} a moderationStatus: ${targetModeration}`);
           await productAPI.updateModerationStatus(producto.id, targetModeration);
+          
           setProductos(prev =>
             prev.map(p => p.id === producto.id ? {
               ...p,
@@ -133,10 +137,11 @@ function GestionProductosPage() {
             isOpen: true,
             type: 'success',
             title: 'Producto Actualizado',
-            message: `El producto ha sido ${accion === 'activar' ? 'activado' : 'suspendido'} correctamente`,
+            message: `El producto ha sido ${accion === 'activar' ? 'activado' : 'suspendido'} correctamente${nuevoEstado === 'suspendido' ? '. Se ha creado una incidencia pendiente automáticamente.' : '.'}`,
             confirmText: 'Entendido'
           });
-        } catch {
+        } catch (error) {
+          console.error('Error al cambiar estado:', error);
           setModalData({
             isOpen: true,
             type: 'error',
@@ -157,33 +162,86 @@ function GestionProductosPage() {
       isOpen: true,
       type: 'warning',
       title: 'Reportar',
-      message: `¿Estás seguro de reportar "${producto.titulo}"?\n\nEsto:\n- Suspenderá automáticamente el producto\n- Lo ocultará de todos los usuarios\n- Notificará al vendedor\n- Permitirá una apelación`,
+      message: `¿Estás seguro de reportar "${producto.titulo}"?\n\nEsto:\n- Creará un reporte administrativo\n- Creará una incidencia pendiente\n- Suspenderá automáticamente el producto\n- Lo ocultará de todos los usuarios\n- Notificará al vendedor\n- Permitirá una apelación`,
       onConfirm: async () => {
         try {
-          await productAPI.updateModerationStatus(producto.id, 'block');
+          console.log('=== INICIANDO REPORTE DE PRODUCTO ===');
+          
+          // 1. Obtener el usuario actual (administrador que reporta)
+          const currentUser = authAPI.getUserData();
+          console.log('Usuario actual:', currentUser);
+          
+          if (!currentUser || !currentUser.id) {
+            throw new Error('No se pudo obtener el usuario actual. Por favor, inicia sesión nuevamente.');
+          }
+
+          // 2. Crear el reporte administrativo en la base de datos
+          console.log('Creando reporte...');
+          const reporteCreado = await reportAPI.create({
+            productId: producto.id,
+            userId: currentUser.id,
+            type: 'reporte_administrativo',
+            description: 'Producto marcado como peligroso por el administrador. Detectado como potencialmente peligroso y suspendido automáticamente.'
+          });
+          console.log('✅ Reporte creado:', reporteCreado);
+
+          // 3. Crear la incidencia asociada al reporte
+          console.log('Creando incidencia...');
+          const incidenciaCreada = await incidenceAPI.create({
+            userId: currentUser.id,
+            productId: producto.id,
+            description: 'Producto reportado y bloqueado por el administrador. Motivo: detectado como potencialmente peligroso.',
+            status: 'pending'
+          });
+          console.log('✅ Incidencia creada:', incidenciaCreada);
+
+          // 4. Actualizar el estado de moderación del producto a 'review' (en revisión)
+          console.log('Actualizando moderationStatus a review...');
+          await productAPI.updateModerationStatus(producto.id, 'review');
+          console.log('✅ ModerationStatus actualizado');
+
+          // 5. Actualizar el estado local
           setProductos(prev =>
             prev.map(p => p.id === producto.id ? {
               ...p,
               es_peligroso: true,
               estado: 'suspendido',
-              moderationStatus: 'block',
+              moderationStatus: 'review', // Cambiado a 'review' para que aparezca en pendientes
               fecha_suspension: new Date().toISOString(),
               razon_suspension: 'Detectado como producto potencialmente peligroso'
             } : p)
           );
+
+          console.log('=== REPORTE COMPLETADO EXITOSAMENTE ===');
+          
           setModalData({
             isOpen: true,
             type: 'success',
-            title: 'Producto Marcado',
-            message: 'El producto ha sido marcado como peligroso y suspendido automáticamente. El vendedor ha sido notificado.',
+            title: 'Producto Reportado',
+            message: 'El producto ha sido reportado y bloqueado automáticamente. La incidencia aparecerá en "Incidencias pendientes" y el vendedor podrá apelar.',
             confirmText: 'Entendido'
           });
-        } catch {
+        } catch (error) {
+          console.error('=== ERROR AL REPORTAR PRODUCTO ===');
+          console.error('Error completo:', error);
+          console.error('Respuesta del servidor:', error.response?.data);
+          console.error('Status:', error.response?.status);
+          
+          let mensajeError = 'No se pudo reportar el producto';
+          
+          if (error.response?.status === 401) {
+            mensajeError = 'Tu sesión ha expirado. Por favor, inicia sesión nuevamente.';
+          } else if (error.response?.data?.message) {
+            mensajeError = error.response.data.message;
+          } else if (error.message) {
+            mensajeError = error.message;
+          }
+          
           setModalData({
             isOpen: true,
             type: 'error',
-            title: 'Error',
-            message: 'No se pudo marcar el producto como peligroso',
+            title: 'Error al Reportar',
+            message: mensajeError,
             confirmText: 'Cerrar'
           });
         }
@@ -539,7 +597,8 @@ function GestionProductosPage() {
                         >
                           <FiEye /> Ver producto
                         </button>
-                        {producto.estado === 'activo' && producto.moderationStatus !== 'block' && (
+                        {/* Suspender: disponible si está activo (moderationStatus === 'active') */}
+                        {producto.moderationStatus === 'active' && (
                           <button
                             onClick={() => cambiarEstadoProducto(producto, 'suspendido')}
                             className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white font-semibold rounded-lg transition"
@@ -548,7 +607,8 @@ function GestionProductosPage() {
                             Suspender
                           </button>
                         )}
-                        {producto.estado === 'suspendido' && !producto.es_peligroso && producto.moderationStatus !== 'block' && (
+                        {/* Activar: disponible si está en revisión y no es peligroso */}
+                        {producto.moderationStatus === 'review' && !producto.es_peligroso && (
                           <button
                             onClick={() => cambiarEstadoProducto(producto, 'activo')}
                             className="px-4 py-2 bg-green-500 hover:bg-green-600 text-white font-semibold rounded-lg transition"
@@ -557,12 +617,14 @@ function GestionProductosPage() {
                             Activar
                           </button>
                         )}
+                        {/* Mensaje para productos bloqueados */}
                         {producto.moderationStatus === 'block' && (
                           <div className="px-4 py-2 bg-red-100 text-red-700 font-semibold rounded-lg border border-red-300">
                             Producto bloqueado por moderación
                           </div>
                         )}
-                        {!producto.es_peligroso && producto.estado !== 'suspendido' && (
+                        {/* Reportar: solo si está activo y no es peligroso */}
+                        {producto.moderationStatus === 'active' && !producto.es_peligroso && (
                           <button
                             onClick={() => marcarComoPeligroso(producto)}
                             className="px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white font-semibold rounded-lg transition"

@@ -11,9 +11,10 @@ import {
   FiUsers,
   FiEye,
   FiLayers,
-  FiExternalLink
+  FiExternalLink,
+  FiMessageSquare
 } from "react-icons/fi";
-import { MdBlock, MdVerified } from "react-icons/md";
+import { MdBlock, MdVerified, MdAssignment } from "react-icons/md";
 import { useNavigate } from "react-router-dom";
 import Modal from "../components/common/Modal";
 import {
@@ -229,6 +230,7 @@ const normalizeIncidence = (
     pending: "pendiente",
     pendiente: "pendiente",
     open: "pendiente",
+    in_progress: "en_revision",
     en_revision: "en_revision",
     review: "en_revision",
     revisando: "en_revision",
@@ -506,15 +508,29 @@ function GestionIncidenciasPage() {
   }, []);
 
   const stats = useMemo(() => {
-    // Contar incidencias basadas en el productModerationStatus
+    // Usar la misma lógica que filteredIncidences para consistencia
     const pendingIncidences = incidences.filter(
-      (inc) => inc.productModerationStatus === "review" || inc.productModerationStatus === "flagged"
+      (inc) => {
+        const modStatus = inc.productModerationStatus;
+        const incStatus = inc.estado;
+        // Pendientes: SOLO las que tienen estado "pendiente"
+        return incStatus === "pendiente" && ["review", "flagged", "block"].includes(modStatus);
+      }
     );
     const inReviewIncidences = incidences.filter(
-      (inc) => inc.productModerationStatus === "review"
+      (inc) => {
+        const modStatus = inc.productModerationStatus;
+        const incStatus = inc.estado;
+        // En revisión: SOLO las que tienen estado "en_revision"
+        return incStatus === "en_revision" && modStatus === "review";
+      }
     );
     const resolvedIncidences = incidences.filter(
-      (inc) => ["active", "block", "suspended", "rejected"].includes(inc.productModerationStatus)
+      (inc) => {
+        const modStatus = inc.productModerationStatus;
+        const incStatus = inc.estado;
+        return incStatus === "resuelto" || ["active", "block", "suspended", "rejected"].includes(modStatus);
+      }
     );
     const pendingAppeals = appeals.filter((ap) => ap.estado === "pendiente" || ap.estado === "pending");
     
@@ -561,19 +577,26 @@ function GestionIncidenciasPage() {
   const filteredIncidences = useMemo(() => {
     return incidences.filter((incidence) => {
       const modStatus = incidence.productModerationStatus;
+      const incStatus = incidence.estado; // estado de la incidencia (pendiente, en_revision, resuelto)
       
-      // Filtrar por tab según el estado de moderación del producto
+      // Filtrar por tab
       if (selectedTab === "pendientes") {
-        // Pendientes: productos en review o flagged (requieren atención inicial)
-        if (modStatus !== "review" && modStatus !== "flagged") return false;
+        // Pendientes: SOLO incidencias con estado "pendiente" (no tomadas aún)
+        if (incStatus !== "pendiente") return false;
+        // Además, el producto debe estar en review/flagged/block
+        if (!["review", "flagged", "block"].includes(modStatus)) return false;
       }
       if (selectedTab === "en_revision") {
-        // En revisión: productos siendo revisados activamente
+        // En revisión: SOLO incidencias con estado "en_revision" (ya tomadas por un moderador)
+        if (incStatus !== "en_revision") return false;
+        // El producto debe estar en review
         if (modStatus !== "review") return false;
       }
       if (selectedTab === "historial") {
-        // Historial: productos con decisión final
-        if (!["active", "block", "suspended", "rejected"].includes(modStatus)) return false;
+        // Historial: incidencias resueltas O productos con decisión final tomada
+        const isResolved = incStatus === "resuelto";
+        const hasFinalDecision = ["active", "block", "suspended", "rejected"].includes(modStatus);
+        if (!isResolved && !hasFinalDecision) return false;
       }
       
       // Filtrar por prioridad
@@ -652,6 +675,38 @@ function GestionIncidenciasPage() {
       ...prev,
       [incidenceId]: value,
     }));
+  };
+
+  const handleTakeInReview = async (incidence) => {
+    try {
+      setActionLoading(true);
+      console.log('Tomando incidencia en revisión:', incidence.id);
+      
+      // Actualizar estado de la incidencia a 'in_progress'
+      await incidenceAPI.update(incidence.id, {
+        status: 'in_progress',
+        userId: currentUser.id // Asignar al moderador actual
+      });
+      
+      showFeedback(
+        "success",
+        "Incidencia tomada",
+        `La incidencia ${incidence.codigo} ahora está en revisión y asignada a ti.`
+      );
+      
+      // Cambiar automáticamente a la pestaña "En revisión"
+      setSelectedTab('en_revision');
+      await refreshData();
+    } catch (error) {
+      console.error('Error al tomar incidencia:', error);
+      showFeedback(
+        "error",
+        "Error",
+        "No se pudo tomar la incidencia en revisión"
+      );
+    } finally {
+      setActionLoading(false);
+    }
   };
 
   const handleModerationStatusUpdate = async (incidence) => {
@@ -879,17 +934,22 @@ function GestionIncidenciasPage() {
   const executeResolveIncidence = async (incidence, decision) => {
     try {
       setActionLoading(true);
-      let status = "resolved";
-      if (decision === "suspender") status = "suspended";
+      
+      // Mapear decisión a resolution
+      let resolution = 'approved';
+      if (decision === 'rechazar') resolution = 'rejected';
+      if (decision === 'suspender') resolution = 'suspended';
+      
+      // Preparar payload con los nuevos campos
       const payload = {
-        status,
-        decision,
-        notas: decisionNotes[incidence.id] || "",
-        fechaResolucion: new Date().toISOString(),
-        resolvedBy: currentUser?.id,
+        status: 'resolved',
+        resolution,
+        resolutionNotes: decisionNotes[incidence.id] || '',
       };
+      
       await incidenceAPI.update(incidence.id, payload);
 
+      // Actualizar estado del producto
       if (incidence.productId) {
         let moderationStatus = "active";
         if (decision === "rechazar") moderationStatus = "flagged";
@@ -903,12 +963,13 @@ function GestionIncidenciasPage() {
           console.warn("No se pudo actualizar moderationStatus del producto:", e);
         }
       }
+      
       await refreshData();
       setDecisionNotes((prev) => ({ ...prev, [incidence.id]: "" }));
       showFeedback(
         "success",
-        "Incidencia actualizada",
-        "Se registró tu decisión correctamente."
+        "Incidencia resuelta",
+        "El vendedor ha sido notificado de tu decisión."
       );
     } catch (error) {
       console.error("Error al resolver incidencia:", error);
@@ -1181,57 +1242,130 @@ function GestionIncidenciasPage() {
                 </div>
               </div>
 
-              {userRole === ROLES.ADMIN && !isHistory && (
-                <div className="mt-5 border border-gray-200 rounded-xl p-4 bg-white">
-                  <div className="flex items-center justify-between flex-wrap gap-3">
-                    <div className="flex items-center gap-2 text-sm font-semibold text-gray-800">
-                      Estado de moderación:
-                      <span className="px-2 py-1 rounded-full bg-gray-100 text-gray-700 text-xs font-medium">
-                        {MODERATION_LABELS[incidence.productModerationStatus] ||
-                          incidence.productModerationStatus ||
-                          "N/D"}
-                      </span>
+              {/* Botón para tomar en revisión (solo en pendientes) */}
+              {!isHistory && incidence.estado === "pendiente" && canResolve && (
+                <div className="mt-5 border-2 border-orange-200 rounded-xl p-5 bg-gradient-to-r from-orange-50 to-yellow-50">
+                  <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+                    <div className="flex items-center gap-3">
+                      <div className="bg-orange-500 text-white rounded-full p-2">
+                        <FiAlertTriangle className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-bold text-gray-900">
+                          Incidencia pendiente de asignación
+                        </p>
+                        <p className="text-xs text-gray-600">
+                          Toma esta incidencia para revisarla y tomar una decisión
+                        </p>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <select
-                        value={
-                          moderationSelections[incidence.id] ??
-                          incidence.productModerationStatus ??
-                          ""
-                        }
-                        onChange={(e) =>
-                          handleModerationSelectionChange(
-                            incidence.id,
-                            e.target.value
-                          )
-                        }
-                        className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
-                      >
-                        <option value="">Seleccionar</option>
-                        {MODERATION_STATUS_OPTIONS.map((opt) => (
-                          <option key={opt.value} value={opt.value}>
-                            {opt.label}
-                          </option>
-                        ))}
-                      </select>
-                      <button
-                        disabled={actionLoading}
-                        onClick={() => handleModerationStatusUpdate(incidence)}
-                        className="px-3 py-1.5 bg-gray-900 text-white rounded-lg text-sm font-semibold hover:bg-black disabled:opacity-50"
-                      >
-                        Actualizar
-                      </button>
-                    </div>
+                    <button
+                      disabled={actionLoading}
+                      onClick={() => handleTakeInReview(incidence)}
+                      className="px-6 py-3 bg-orange-600 text-white font-bold rounded-xl hover:bg-orange-700 transition disabled:opacity-50 flex items-center gap-2 shadow-lg hover:shadow-xl"
+                    >
+                      <MdAssignment className="text-xl" />
+                      Tomar en revisión
+                    </button>
                   </div>
                 </div>
               )}
 
+              {/* Controles de revisión (solo en "En revisión") */}
               {!isHistory &&
                 incidence.estado === "en_revision" &&
                 canResolve && (
                   <div className="mt-6">
+                    {/* Selector de estado de moderación */}
+                    <div className="mb-5 border border-gray-200 rounded-xl p-4 bg-gray-50">
+                      <div className="flex items-center justify-between flex-wrap gap-3">
+                        <div className="flex items-center gap-2 text-sm font-semibold text-gray-800">
+                          Estado de moderación:
+                          <span className="px-2 py-1 rounded-full bg-gray-100 text-gray-700 text-xs font-medium">
+                            {MODERATION_LABELS[incidence.productModerationStatus] ||
+                              incidence.productModerationStatus ||
+                              "N/D"}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <select
+                            value={
+                              moderationSelections[incidence.id] ??
+                              incidence.productModerationStatus ??
+                              ""
+                            }
+                            onChange={(e) =>
+                              handleModerationSelectionChange(
+                                incidence.id,
+                                e.target.value
+                              )
+                            }
+                            className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
+                          >
+                            <option value="">Seleccionar</option>
+                            {MODERATION_STATUS_OPTIONS.map((opt) => (
+                              <option key={opt.value} value={opt.value}>
+                                {opt.label}
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            disabled={actionLoading}
+                            onClick={() => handleModerationStatusUpdate(incidence)}
+                            className="px-3 py-1.5 bg-gray-900 text-white rounded-lg text-sm font-semibold hover:bg-black disabled:opacity-50"
+                          >
+                            Actualizar
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Botón para ver apelaciones relacionadas */}
+                    {incidence.appeals && incidence.appeals.length > 0 && (
+                      <div className="mb-5 border-2 border-purple-300 rounded-xl p-4 bg-gradient-to-r from-purple-50 to-pink-50">
+                        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                          <div className="flex items-start gap-3">
+                            <div className="bg-purple-600 text-white rounded-full p-2 flex-shrink-0">
+                              <FiMessageSquare className="w-5 h-5" />
+                            </div>
+                            <div>
+                              <p className="text-sm font-bold text-gray-900">
+                                {incidence.appeals.length} Apelación{incidence.appeals.length > 1 ? 'es' : ''} del vendedor
+                              </p>
+                              <p className="text-xs text-gray-600">
+                                {pendingAppealsCount > 0 
+                                  ? `${pendingAppealsCount} pendiente${pendingAppealsCount > 1 ? 's' : ''} de revisión`
+                                  : 'Todas revisadas'}
+                              </p>
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => {
+                              // Navegar a la pestaña de apelaciones y hacer scroll a la apelación
+                              setSelectedTab('apelaciones');
+                              setTimeout(() => {
+                                const appealElement = document.getElementById(`appeal-${incidence.appeals[0].id}`);
+                                if (appealElement) {
+                                  appealElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                  appealElement.classList.add('ring-4', 'ring-purple-300');
+                                  setTimeout(() => {
+                                    appealElement.classList.remove('ring-4', 'ring-purple-300');
+                                  }, 2000);
+                                }
+                              }, 300);
+                            }}
+                            className="px-5 py-2.5 bg-purple-600 text-white font-bold rounded-xl hover:bg-purple-700 transition flex items-center gap-2 shadow-lg hover:shadow-xl whitespace-nowrap"
+                          >
+                            <FiExternalLink className="text-lg" />
+                            Ver apelación{incidence.appeals.length > 1 ? 'es' : ''}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Observaciones y acciones */}
                     <label className="block text-sm font-semibold text-gray-800 mb-2">
-                      Observaciones / decisión
+                      Observaciones / Mensaje al vendedor
                     </label>
                     <textarea
                       value={decisionNotes[incidence.id] || ""}
@@ -1242,9 +1376,20 @@ function GestionIncidenciasPage() {
                         }))
                       }
                       rows="3"
-                      placeholder="Describe la resolución para informar al vendedor."
+                      placeholder="Describe la resolución y el mensaje que se enviará al vendedor."
                       className="w-full border border-gray-300 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-orange-500 text-sm"
                     />
+                    {pendingAppealsCount > 0 && (
+                      <div className="mt-3 p-3 bg-purple-50 border border-purple-200 rounded-lg flex items-start gap-2">
+                        <FiAlertTriangle className="text-purple-600 flex-shrink-0 mt-0.5" />
+                        <p className="text-sm text-purple-800">
+                          <span className="font-semibold">
+                            Apelación pendiente:
+                          </span>{" "}
+                          documenta cada decisión.
+                        </p>
+                      </div>
+                    )}
                     <div className="flex flex-col sm:flex-row gap-3 mt-4">
                       <button
                         disabled={actionLoading}
@@ -1274,11 +1419,6 @@ function GestionIncidenciasPage() {
                         <FiAlertTriangle /> Suspender
                       </button>
                     </div>
-                    {incidence.hasPendingAppeal && (
-                      <p className="mt-3 text-sm text-purple-700">
-                        Apelación pendiente: documenta cada decisión.
-                      </p>
-                    )}
                   </div>
                 )}
 
@@ -1352,6 +1492,7 @@ function GestionIncidenciasPage() {
           return (
             <div
               key={appeal.id}
+              id={`appeal-${appeal.id}`}
               className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm hover:shadow-md transition-shadow"
             >
               <div className="flex flex-col lg:flex-row gap-6">
@@ -1416,18 +1557,24 @@ function GestionIncidenciasPage() {
                   <div className="flex gap-3 mt-4">
                     <button
                       onClick={() => {
-                        // Determinar el tab correcto según el productModerationStatus
+                        // Determinar el tab correcto usando la misma lógica que el filtro
                         let targetTab = 'pendientes';
                         if (relatedIncidence) {
                           const modStatus = relatedIncidence.productModerationStatus;
-                          if (modStatus === 'review' || modStatus === 'flagged') {
-                            targetTab = 'en_revision';
-                          } else if (['active', 'block', 'suspended', 'rejected'].includes(modStatus)) {
+                          const incStatus = relatedIncidence.estado;
+                          
+                          // Usar la misma lógica que filteredIncidences
+                          if (incStatus === "resuelto" || ["active", "block", "suspended", "rejected"].includes(modStatus)) {
                             targetTab = 'historial';
+                          } else if (modStatus === 'review' || modStatus === 'flagged') {
+                            // Si está en review y no resuelto, puede estar en pendientes o en_revision
+                            targetTab = 'en_revision';
+                          } else {
+                            targetTab = 'pendientes';
                           }
                         }
                         
-                        console.log('Navegando a incidencia:', appeal.incidenceId, 'Tab:', targetTab, 'ModStatus:', relatedIncidence?.productModerationStatus);
+                        console.log('Navegando a incidencia:', appeal.incidenceId, 'Tab:', targetTab, 'ModStatus:', relatedIncidence?.productModerationStatus, 'IncStatus:', relatedIncidence?.estado);
                         setSelectedTab(targetTab);
                         
                         // Scroll suave hacia la incidencia después de cambiar de tab

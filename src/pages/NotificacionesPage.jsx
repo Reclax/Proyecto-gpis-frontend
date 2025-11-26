@@ -159,7 +159,7 @@ function NotificacionesPage() {
                           )}
                         </div>
                         
-                        <p className="text-gray-600 mb-2 line-clamp-2">
+                        <p className="text-gray-600 mb-2 whitespace-pre-wrap">
                           {notification.message}
                         </p>
                         

@@ -157,7 +157,7 @@ const NotificationIcon = () => {
                             <div className="w-2 h-2 bg-blue-500 rounded-full flex-shrink-0"></div>
                           )}
                         </div>
-                        <p className="text-sm text-gray-600 line-clamp-2">
+                        <p className="text-sm text-gray-600 line-clamp-2" title={notification.message}>
                           {notification.message}
                         </p>
                         <div className="flex items-center justify-between mt-2">
