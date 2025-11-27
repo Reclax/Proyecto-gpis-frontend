@@ -51,11 +51,24 @@ const NotificationIcon = () => {
       await markAsRead(notification.id);
     }
 
+    setIsOpen(false); // Cerrar dropdown
+
     // Si es una notificación de mensaje, navegar al chat
     if (notification.conversationId || notification.originalMessage?.conversationId) {
       const conversationId = notification.conversationId || notification.originalMessage?.conversationId;
-      setIsOpen(false); // Cerrar dropdown
       navigate(`/chat/${conversationId}`);
+    }
+    // Si es una notificación de reporte con productId, navegar a gestión de incidencias
+    else if (notification.productId || notification.reportId) {
+      const productId = notification.productId;
+      // Navegar a la pestaña de reportes pendientes con scroll al producto
+      navigate('/gestion-incidencias', { 
+        state: { 
+          tab: 'reportes',
+          productId: productId,
+          scrollToProduct: true 
+        } 
+      });
     }
   };
 

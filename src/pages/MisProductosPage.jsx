@@ -53,6 +53,8 @@ function MisProductosPage() {
           moderationStatus: product.moderationStatus || 'active',
           incidenceId: product.incidenceId || null,
           appealStatus: product.appealStatus || null,
+          hasResolvedIncidence: product.hasResolvedIncidence || false,
+          incidenceResolution: product.incidenceResolution || null,
           visitas: 0,
           imagen: product.ProductPhotos && product.ProductPhotos.length > 0 
             ? (product.ProductPhotos[0].url.startsWith('http') 
@@ -111,6 +113,8 @@ function MisProductosPage() {
           moderationStatus: product.moderationStatus || 'active',
           incidenceId: product.incidenceId || null,
           appealStatus: product.appealStatus || null,
+          hasResolvedIncidence: product.hasResolvedIncidence || false,
+          incidenceResolution: product.incidenceResolution || null,
           visitas: 0,
           imagen: product.ProductPhotos && product.ProductPhotos.length > 0 
             ? (product.ProductPhotos[0].url.startsWith('http') 
@@ -426,20 +430,30 @@ function MisProductosPage() {
                           <p className="text-sm text-gray-500">{producto.categoria} • Publicado el {new Date(producto.fecha).toLocaleDateString('es-EC')}</p>
                         </div>
                         <div className="flex flex-col items-end gap-1">
-                          <span className={`px-4 py-1 rounded-full text-sm font-semibold whitespace-nowrap ${
-                            producto.estado === 'Activo'
-                              ? 'bg-green-100 text-green-700'
-                              : 'bg-gray-100 text-gray-700'
-                          }`}>
-                            {producto.estado}
-                          </span>
-                          {producto.moderationStatus !== 'active' && (
-                            <span className={`px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap ${
-                              producto.moderationStatus === 'review'
-                                ? 'bg-orange-100 text-orange-700'
-                                : 'bg-red-100 text-red-700'
+                          {/* Estado de moderación tiene prioridad */}
+                          {producto.moderationStatus === 'suspended' ? (
+                            <span className="px-4 py-1 rounded-full text-sm font-semibold whitespace-nowrap bg-red-100 text-red-700">
+                              Suspendido
+                            </span>
+                          ) : producto.moderationStatus === 'flagged' ? (
+                            <span className="px-4 py-1 rounded-full text-sm font-semibold whitespace-nowrap bg-red-100 text-red-700">
+                              Bloqueado
+                            </span>
+                          ) : producto.moderationStatus === 'review' ? (
+                            <span className="px-4 py-1 rounded-full text-sm font-semibold whitespace-nowrap bg-orange-100 text-orange-700">
+                              En revisión
+                            </span>
+                          ) : producto.moderationStatus === 'block' ? (
+                            <span className="px-4 py-1 rounded-full text-sm font-semibold whitespace-nowrap bg-red-100 text-red-700">
+                              Bloqueado
+                            </span>
+                          ) : (
+                            <span className={`px-4 py-1 rounded-full text-sm font-semibold whitespace-nowrap ${
+                              producto.estado === 'Activo'
+                                ? 'bg-green-100 text-green-700'
+                                : 'bg-gray-100 text-gray-700'
                             }`}>
-                              {producto.moderationStatus === 'review' ? 'En revisión' : 'Bloqueado'}
+                              {producto.estado}
                             </span>
                           )}
                           {producto.appealStatus && (
@@ -467,7 +481,8 @@ function MisProductosPage() {
 
                       {/* Botones de acción */}
                       <div className="flex flex-wrap gap-3">
-                        {producto.moderationStatus !== 'block' && (
+                        {/* Editar: solo si no está bloqueado/suspendido/flagged/en revisión */}
+                        {!['block', 'suspended', 'flagged', 'review'].includes(producto.moderationStatus) && (
                           <button
                             onClick={() => handleEditar(producto.id)}
                             className="px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2 font-semibold"
@@ -476,7 +491,9 @@ function MisProductosPage() {
                             Editar
                           </button>
                         )}
-                        {producto.moderationStatus === 'block' && !producto.appealStatus && (
+                        {/* Apelar: solo para productos en 'block' (temporal), NO para suspended/flagged (decisión final) */}
+                        {producto.moderationStatus === 'block' && 
+                         !producto.appealStatus && (
                           <button
                             onClick={() => handleApelar(producto)}
                             className="px-5 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors flex items-center gap-2 font-semibold"
@@ -485,9 +502,16 @@ function MisProductosPage() {
                             Apelar bloqueo
                           </button>
                         )}
+                        {/* Eliminar: deshabilitado si está bloqueado/suspendido */}
                         <button
                           onClick={() => handleEliminar(producto.id, producto.nombre)}
-                          className="px-5 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors flex items-center gap-2 font-semibold"
+                          disabled={['block', 'suspended', 'flagged'].includes(producto.moderationStatus)}
+                          className={`px-5 py-2 rounded-lg transition-colors flex items-center gap-2 font-semibold ${
+                            ['block', 'suspended', 'flagged'].includes(producto.moderationStatus)
+                              ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
+                              : 'bg-red-600 text-white hover:bg-red-700'
+                          }`}
+                          title={['block', 'suspended', 'flagged'].includes(producto.moderationStatus) ? 'No puedes eliminar un producto bloqueado' : ''}
                         >
                           <FiTrash2 />
                           Eliminar

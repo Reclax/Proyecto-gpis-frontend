@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import {
   FiAlertTriangle,
   FiChevronDown,
@@ -15,7 +15,7 @@ import {
   FiMessageSquare
 } from "react-icons/fi";
 import { MdBlock, MdVerified, MdAssignment } from "react-icons/md";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import Modal from "../components/common/Modal";
 import {
   LIMITES_INCIDENCIAS,
@@ -340,6 +340,8 @@ const TAB_OPTIONS = [
 function GestionIncidenciasPage() {
   usePageTitle("Gestión de Incidencias");
   const navigate = useNavigate();
+  const location = useLocation();
+  const productRefs = useRef({});
 
   const [initializing, setInitializing] = useState(true);
   const [isAuthorized, setIsAuthorized] = useState(false);
@@ -494,6 +496,31 @@ function GestionIncidenciasPage() {
       refreshData();
     }
   }, [isAuthorized, userMap, refreshData]);
+
+  // Manejar navegación desde notificaciones
+  useEffect(() => {
+    if (location.state?.tab && location.state?.productId && location.state?.scrollToProduct) {
+      // Cambiar a la pestaña especificada
+      setSelectedTab(location.state.tab);
+      
+      // Esperar a que se renderice la lista y hacer scroll
+      setTimeout(() => {
+        const productId = location.state.productId;
+        const element = productRefs.current[`product-${productId}`];
+        if (element) {
+          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          // Destacar temporalmente
+          element.style.backgroundColor = '#fef3c7'; // yellow-100
+          setTimeout(() => {
+            element.style.backgroundColor = '';
+          }, 2000);
+        }
+      }, 500);
+      
+      // Limpiar el state para que no se repita en navegaciones futuras
+      window.history.replaceState({}, document.title);
+    }
+  }, [location.state]);
 
   const closeModal = () => setModalData((prev) => ({ ...prev, isOpen: false }));
 
@@ -1010,6 +1037,7 @@ function GestionIncidenciasPage() {
           return (
             <div
               key={group.productId}
+              ref={(el) => (productRefs.current[`product-${group.productId}`] = el)}
               className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm"
             >
               <div className="flex flex-col gap-4">
