@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { authAPI, productAPI, categoryAPI, incidenceAPI, appealAPI, userAPI, API_BASE_URL } from '../services/api';
 import { useNavigate, Link } from 'react-router-dom';
-import { FiEye, FiEdit, FiTrash2, FiPlus, FiAlertCircle, FiX, FiSave, FiUpload, FiDollarSign, FiMapPin, FiTag, FiFileText } from 'react-icons/fi';
+import { FiEye, FiEdit, FiTrash2, FiPlus, FiAlertCircle, FiAlertTriangle, FiX, FiSave, FiUpload, FiDollarSign, FiMapPin, FiTag, FiFileText } from 'react-icons/fi';
 import { HiDevicePhoneMobile, HiShoppingBag, HiHomeModern, HiTrophy, HiTruck } from 'react-icons/hi2';
 import { IoGameController } from 'react-icons/io5';
   // Mapeo de íconos para categorías principales (igual que en VenderPage)
@@ -42,7 +42,20 @@ function MisProductosPage() {
         const response = await productAPI.getMyProducts();
         
         // Mapear productos del backend al formato del frontend, mostrando categoría y subcategoría si existen
-        const mappedProducts = response.map(product => ({
+        const mappedProducts = response.map(product => {
+          // Debug: verificar qué datos llegan del backend
+          const reportsData = product.Reports || [];
+          const incidencesData = product.Incidences || [];
+          
+          console.log(`📦 Producto ${product.id}:`, {
+            moderationStatus: product.moderationStatus,
+            reportsCount: reportsData.length,
+            incidencesCount: incidencesData.length,
+            reports: reportsData,
+            incidences: incidencesData
+          });
+          
+          return {
           id: product.id,
           nombre: product.title,
           descripcion: product.description || 'Sin descripción',
@@ -55,6 +68,8 @@ function MisProductosPage() {
           appealStatus: product.appealStatus || null,
           hasResolvedIncidence: product.hasResolvedIncidence || false,
           incidenceResolution: product.incidenceResolution || null,
+          reports: reportsData, // Reportes recibidos (ya mapeado correctamente)
+          incidences: incidencesData, // Incidencias activas (ya mapeado correctamente)
           visitas: 0,
           imagen: product.ProductPhotos && product.ProductPhotos.length > 0 
             ? (product.ProductPhotos[0].url.startsWith('http') 
@@ -62,7 +77,7 @@ function MisProductosPage() {
                : `${API_BASE_URL}${product.ProductPhotos[0].url}`)
             : "📦",
           fecha: product.createdAt || new Date().toISOString()
-        }));
+        }});
 
         setProductos(mappedProducts);
       } catch (error) {
@@ -115,6 +130,8 @@ function MisProductosPage() {
           appealStatus: product.appealStatus || null,
           hasResolvedIncidence: product.hasResolvedIncidence || false,
           incidenceResolution: product.incidenceResolution || null,
+          reports: product.Reports || [],
+          incidences: product.Incidences || [],
           visitas: 0,
           imagen: product.ProductPhotos && product.ProductPhotos.length > 0 
             ? (product.ProductPhotos[0].url.startsWith('http') 
@@ -252,33 +269,30 @@ function MisProductosPage() {
 
   const handleApelar = async (producto) => {
     try {
-      // Buscar la incidencia relacionada con este producto
-      const incidencias = await incidenceAPI.getAll();
-      const incidencia = incidencias.find(inc => inc.productId === producto.id);
+      // Primero intentar usar las incidencias ya cargadas del producto
+      let incidencia = null;
+      
+      if (producto.incidences && producto.incidences.length > 0) {
+        // Buscar incidencia activa (pending o in_progress)
+        incidencia = producto.incidences.find(inc => 
+          inc.status === 'pending' || inc.status === 'in_progress'
+        );
+        
+        // Si no hay activa, tomar la más reciente
+        if (!incidencia) {
+          incidencia = producto.incidences[producto.incidences.length - 1];
+        }
+      } else {
+        // Buscar en todas las incidencias como fallback
+        const incidencias = await incidenceAPI.getAll();
+        incidencia = incidencias.find(inc => 
+          inc.productId === producto.id && 
+          (inc.status === 'pending' || inc.status === 'in_progress')
+        );
+      }
       
       if (!incidencia) {
-        // Si no existe incidencia, crear una automáticamente
-        try {
-          // Obtener el usuario actual desde la API
-          const currentUserData = await userAPI.whoAmI();
-          
-          if (!currentUserData || !currentUserData.id) {
-            showNotification('error', 'No se pudo identificar al usuario');
-            return;
-          }
-
-          const nuevaIncidencia = await incidenceAPI.create({
-            description: `Producto bloqueado: ${producto.nombre}`,
-            userId: currentUserData.id,
-            productId: producto.id,
-            status: 'pending'
-          });
-          
-          setAppealModal({ show: true, product: producto, incidenceId: nuevaIncidencia.incidence.id });
-        } catch (createError) {
-          console.error('Error creando incidencia:', createError);
-          showNotification('error', 'Error al crear la incidencia para la apelación');
-        }
+        showNotification('error', 'No se encontró una incidencia activa para este producto');
         return;
       }
       
@@ -474,10 +488,27 @@ function MisProductosPage() {
 
                       <div className="flex items-center gap-6 mb-4 flex-wrap">
                         <span className="text-orange-600 font-bold text-2xl">${producto.precio}</span>
-                        <span className="flex items-center gap-2 text-gray-600">
-                         
-                        </span>
                       </div>
+
+                      {/* Mostrar reportes si el producto tiene incidencias */}
+                      {['review', 'block', 'flagged'].includes(producto.moderationStatus) && producto.reports && producto.reports.length > 0 && (
+                        <div className="mb-4 p-4 bg-yellow-50 border-l-4 border-yellow-500 rounded-lg">
+                          <div className="flex items-start gap-2">
+                            <FiAlertTriangle className="text-yellow-600 mt-1 flex-shrink-0" />
+                            <div className="flex-1">
+                              <p className="font-semibold text-yellow-900 mb-2">Motivos de revisión:</p>
+                              <ul className="space-y-1 text-sm text-yellow-800">
+                                {producto.reports.map((report, idx) => (
+                                  <li key={idx} className="flex items-start gap-2">
+                                    <span className="text-yellow-600">•</span>
+                                    <span><strong>{report.typeReport}:</strong> {report.description}</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          </div>
+                        </div>
+                      )}
 
                       {/* Botones de acción */}
                       <div className="flex flex-wrap gap-3">
@@ -491,15 +522,16 @@ function MisProductosPage() {
                             Editar
                           </button>
                         )}
-                        {/* Apelar: solo para productos en 'block' (temporal), NO para suspended/flagged (decisión final) */}
-                        {producto.moderationStatus === 'block' && 
-                         !producto.appealStatus && (
+                        {/* Apelar: para productos en 'block' O 'review' (cuando hay incidencia activa) */}
+                        {['block', 'review'].includes(producto.moderationStatus) && 
+                         !producto.appealStatus && 
+                         producto.incidences && producto.incidences.length > 0 && (
                           <button
                             onClick={() => handleApelar(producto)}
                             className="px-5 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors flex items-center gap-2 font-semibold"
                           >
                             <FiFileText />
-                            Apelar bloqueo
+                            Apelar revisión
                           </button>
                         )}
                         {/* Eliminar: deshabilitado si está bloqueado/suspendido */}

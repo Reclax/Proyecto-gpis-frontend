@@ -352,6 +352,22 @@ function GestionIncidenciasPage() {
   const [userMap, setUserMap] = useState({});
   const [productsMap, setProductsMap] = useState({});
 
+  // Filtrar solo moderadores y administradores para asignación
+  const moderatorUsers = useMemo(() => {
+    return users.filter(user => {
+      // Verificar si el usuario tiene rol de Moderador (3) o Administrador (1)
+      if (user.Roles && Array.isArray(user.Roles)) {
+        return user.Roles.some(role => 
+          role.roleName === 'Moderador' || 
+          role.roleName === 'Administrador' ||
+          role.id === 1 || 
+          role.id === 3
+        );
+      }
+      return false;
+    });
+  }, [users]);
+
   const [reports, setReports] = useState([]);
   const [incidences, setIncidences] = useState([]);
   const [appeals, setAppeals] = useState([]);
@@ -433,6 +449,8 @@ function GestionIncidenciasPage() {
         incidenceAPI.getAll().catch(() => []),
         appealAPI.getAll().catch(() => []),
       ]);
+
+
 
       // Primero necesitamos las incidencias raw para normalizar appeals
       const rawIncidences = Array.isArray(incidencesData) ? incidencesData : [];
@@ -559,7 +577,19 @@ function GestionIncidenciasPage() {
         return incStatus === "resuelto" || ["active", "block", "suspended", "rejected"].includes(modStatus);
       }
     );
-    const pendingAppeals = appeals.filter((ap) => ap.estado === "pendiente" || ap.estado === "pending");
+    const pendingAppeals = appeals.filter((ap) => {
+      if (ap.estado !== "pendiente" && ap.estado !== "pending") return false;
+      
+      // 🔐 FILTRO DE MODERADOR: Si es moderador, solo ver apelaciones de sus incidencias
+      if (userRole === ROLES.MODERADOR && currentUser?.id) {
+        const incidencia = incidences.find(inc => inc.id == ap.incidenceId);
+        if (!incidencia || incidencia.moderadorId != currentUser.id) {
+          return false;
+        }
+      }
+      
+      return true;
+    });
     
     return {
       reportCount: reports.length,
@@ -569,7 +599,7 @@ function GestionIncidenciasPage() {
       suspendedCount: 0, // Ya no usamos suspendido como categoría separada
       appealCount: pendingAppeals.length,
     };
-  }, [reports, incidences, appeals]);
+  }, [reports, incidences, appeals, userRole, currentUser]);
 
   const incidencesForStats = useMemo(
     () =>
@@ -602,9 +632,12 @@ function GestionIncidenciasPage() {
     : null;
 
   const filteredIncidences = useMemo(() => {
-    return incidences.filter((incidence) => {
+    
+    const filtered = incidences.filter((incidence) => {
       const modStatus = incidence.productModerationStatus;
       const incStatus = incidence.estado; // estado de la incidencia (pendiente, en_revision, resuelto)
+      
+
       
       // Filtrar por tab
       if (selectedTab === "pendientes") {
@@ -612,33 +645,58 @@ function GestionIncidenciasPage() {
         if (incStatus !== "pendiente") return false;
         // Además, el producto debe estar en review/flagged/block
         if (!["review", "flagged", "block"].includes(modStatus)) return false;
+        
+        // 🔐 FILTRO DE MODERADOR: Si es moderador (no admin), solo ver incidencias asignadas a él
+        if (userRole === ROLES.MODERADOR && currentUser?.id) {
+          if (incidence.moderadorId != currentUser.id) return false;
+        }
       }
       if (selectedTab === "en_revision") {
         // En revisión: SOLO incidencias con estado "en_revision" (ya tomadas por un moderador)
         if (incStatus !== "en_revision") return false;
         // El producto debe estar en review
         if (modStatus !== "review") return false;
+        
+        // 🔐 FILTRO DE MODERADOR: Si es moderador, solo ver sus propias incidencias
+        if (userRole === ROLES.MODERADOR && currentUser?.id) {
+          if (incidence.moderadorId != currentUser.id) return false;
+        }
       }
       if (selectedTab === "historial") {
         // Historial: incidencias resueltas O productos con decisión final tomada
         const isResolved = incStatus === "resuelto";
         const hasFinalDecision = ["active", "block", "suspended", "rejected"].includes(modStatus);
         if (!isResolved && !hasFinalDecision) return false;
+        
+        // 🔐 FILTRO DE MODERADOR: Si es moderador, solo ver incidencias que resolvió él
+        if (userRole === ROLES.MODERADOR && currentUser?.id) {
+          if (incidence.moderadorId != currentUser.id) return false;
+        }
       }
       
       // Filtrar por prioridad
       if (priorityFilter !== "todos" && incidence.prioridad !== priorityFilter) return false;
       
-      // Filtrar por búsqueda
-      if (searchTerm.trim() === "") return true;
-      const term = searchTerm.trim().toLowerCase();
-      return (
-        incidence.codigo.toLowerCase().includes(term) ||
-        incidence.productTitle.toLowerCase().includes(term) ||
-        (incidence.moderadorNombre || "").toLowerCase().includes(term)
-      );
+      return true;
     });
-  }, [incidences, priorityFilter, searchTerm, selectedTab]);
+    
+    return filtered;
+  }, [incidences, priorityFilter, searchTerm, selectedTab, userRole, currentUser]);
+
+  // Filtrar apelaciones para moderadores
+  const filteredAppeals = useMemo(() => {
+    let filtered = appeals.filter((ap) => ap.estado === "pendiente" || ap.estado === "pending");
+    
+    // 🔐 FILTRO DE MODERADOR: Si es moderador, solo ver apelaciones de sus incidencias
+    if (userRole === ROLES.MODERADOR && currentUser?.id) {
+      filtered = filtered.filter((ap) => {
+        const incidencia = incidences.find(inc => inc.id == ap.incidenceId);
+        return incidencia && incidencia.moderadorId == currentUser.id;
+      });
+    }
+    
+    return filtered;
+  }, [appeals, incidences, userRole, currentUser]);
 
   const reportGroups = useMemo(() => {
     const productIdsWithIncidence = new Set(
@@ -834,6 +892,7 @@ function GestionIncidenciasPage() {
         return;
       }
 
+      const reportCount = group.reports.length;
       const aggregatedDescription = group.reports
         .map(
           (r) =>
@@ -849,14 +908,27 @@ function GestionIncidenciasPage() {
         status: "pending",
         userId: targetModeratorId,
         productId: group.productId,
+        reportCount: reportCount, // Enviar cantidad de reportes para auto-suspensión
+        // Indicar si fue asignado por admin (para notificaciones)
+        assignedByAdminId: !assignToSelf && currentUser?.id ? currentUser.id : null,
       };
 
-      await incidenceAPI.create(incidencePayload);
+      console.log(`📊 Creando incidencia con ${reportCount} reportes para producto ${group.productId}`);
+
+      const response = await incidenceAPI.create(incidencePayload);
+      
+      // Si fue auto-suspendido, mostrar mensaje diferente
+      if (response.autoSuspended) {
+        console.log(`🔒 Producto auto-suspendido por ${reportCount} reportes`);
+      }
 
       try {
-        await productAPI.updateModerationStatus(group.productId, "review");
+        // Solo actualizar moderationStatus si NO fue auto-suspendido
+        if (!response.autoSuspended) {
+          await productAPI.updateModerationStatus(group.productId, "review");
+        }
       } catch (e) {
-        console.warn("No se pudo marcar el producto en revisión:", e);
+        console.warn("No se pudo actualizar estado de moderación:", e);
       }
 
       for (const r of group.reports) {
@@ -868,13 +940,22 @@ function GestionIncidenciasPage() {
       }
 
       await refreshData();
-      showFeedback(
-        "success",
-        "Incidencia creada",
-        assignToSelf
-          ? "La incidencia fue creada y asignada a ti exitosamente."
-          : "La incidencia fue creada y asignada."
-      );
+      
+      if (response.autoSuspended) {
+        showFeedback(
+          "warning",
+          "Producto suspendido automáticamente",
+          `El producto ha sido suspendido automáticamente por recibir ${reportCount} reportes. Se movió directo a historial.`
+        );
+      } else {
+        showFeedback(
+          "success",
+          "Incidencia creada",
+          assignToSelf
+            ? "La incidencia fue creada y asignada a ti exitosamente."
+            : "La incidencia fue creada y asignada."
+        );
+      }
     } catch (error) {
       console.error("Error al convertir grupo de reportes:", error);
       showFeedback(
@@ -1034,12 +1115,34 @@ function GestionIncidenciasPage() {
       <div className="space-y-4">
         {filteredReportGroups.map((group) => {
           const selectedModerator = reportGroupAssignments[group.productId] || "";
+          const isHighRisk = group.reports.length >= 5; // 5+ reportes = alto riesgo
+          
           return (
             <div
               key={group.productId}
               ref={(el) => (productRefs.current[`product-${group.productId}`] = el)}
-              className="bg-white border border-gray-200 rounded-2xl p-6 shadow-sm"
+              className={`bg-white border rounded-2xl p-6 shadow-sm ${
+                isHighRisk 
+                  ? 'border-red-500 border-2 bg-red-50' 
+                  : 'border-gray-200'
+              }`}
             >
+              {/* Alerta de auto-suspensión */}
+              {isHighRisk && (
+                <div className="mb-4 p-3 bg-red-100 border-l-4 border-red-600 rounded-lg">
+                  <div className="flex items-start gap-2">
+                    <FiAlertTriangle className="text-red-600 mt-0.5 flex-shrink-0" />
+                    <div>
+                      <p className="font-bold text-red-900">⚠️ ALTO RIESGO - Auto-suspensión automática</p>
+                      <p className="text-sm text-red-800 mt-1">
+                        Este producto tiene {group.reports.length} reportes. Al crear la incidencia, 
+                        será <strong>suspendido automáticamente</strong> y se moverá directo a historial.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+              
               <div className="flex flex-col gap-4">
                 <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
                   <div>
@@ -1056,8 +1159,13 @@ function GestionIncidenciasPage() {
                       <span className="px-2 py-1 bg-blue-50 text-blue-700 rounded-full font-medium">
                         Moderación: {MODERATION_LABELS[group.productModerationStatus] || group.productModerationStatus || "desconocido"}
                       </span>
-                      <span className="px-2 py-1 bg-orange-50 text-orange-700 rounded-full font-semibold inline-flex items-center gap-1">
+                      <span className={`px-2 py-1 rounded-full font-semibold inline-flex items-center gap-1 ${
+                        isHighRisk 
+                          ? 'bg-red-200 text-red-900' 
+                          : 'bg-orange-50 text-orange-700'
+                      }`}>
                         <FiAlertTriangle /> {group.reports.length} reporte(s)
+                        {isHighRisk && ' 🔒'}
                       </span>
                     </div>
                   </div>
@@ -1071,9 +1179,13 @@ function GestionIncidenciasPage() {
                     <button
                       disabled={actionLoading}
                       onClick={() => handleConvertReportGroup(group, true)}
-                      className="px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white font-semibold rounded-xl disabled:opacity-50"
+                      className={`px-4 py-2 font-semibold rounded-xl disabled:opacity-50 ${
+                        isHighRisk
+                          ? 'bg-red-600 hover:bg-red-700 text-white'
+                          : 'bg-orange-600 hover:bg-orange-700 text-white'
+                      }`}
                     >
-                      Crear incidencia y tomar
+                      {isHighRisk ? '🔒 Suspender automáticamente' : 'Crear incidencia y tomar'}
                     </button>
                   </div>
                 </div>
@@ -1092,7 +1204,7 @@ function GestionIncidenciasPage() {
                         }
                       >
                         <option value="">Seleccionar moderador</option>
-                        {users.map((u) => (
+                        {moderatorUsers.map((u) => (
                           <option key={u.id} value={u.id}>
                             {`${u.name || ""} ${u.lastname || ""}`.trim() ||
                               u.email ||
@@ -1198,6 +1310,7 @@ function GestionIncidenciasPage() {
                     <span className="px-2 py-1 rounded-full bg-gray-100 font-medium inline-flex items-center gap-1">
                       <FiTag /> {incidence.tipo}
                     </span>
+                    {/*
                     <span
                       className={`px-2 py-1 rounded-full font-medium ${
                         incidence.prioridad === "alta"
@@ -1207,15 +1320,16 @@ function GestionIncidenciasPage() {
                           : "bg-amber-50 text-amber-700"
                       }`}
                     >
-                      Prioridad {incidence.prioridad}
                     </span>
+                      Prioridad {incidence.prioridad}
                     {pendingAppealsCount > 0 && (
                       <span className="px-2 py-1 rounded-full bg-purple-50 text-purple-700 font-semibold inline-flex items-center gap-1 animate-pulse">
                         <FiAlertTriangle className="text-purple-600" />
                         {pendingAppealsCount} Apelación{pendingAppealsCount > 1 ? 'es' : ''} pendiente{pendingAppealsCount > 1 ? 's' : ''}
                       </span>
                     )}
-                    <span className="px-2 py-1 rounded-full bg-gray-100 font-medium">
+                      */}
+                    <span className="px-2 py-1 rounded-full bg-purple-100 text-purple-700 font-medium">
                       Estado:{" "}
                       {STATUS_LABELS[incidence.productStatusGeneral] ||
                         incidence.productStatusGeneral ||
@@ -1304,7 +1418,7 @@ function GestionIncidenciasPage() {
                 incidence.estado === "en_revision" &&
                 canResolve && (
                   <div className="mt-6">
-                    {/* Selector de estado de moderación */}
+                    {/* Selector de estado de moderación 
                     <div className="mb-5 border border-gray-200 rounded-xl p-4 bg-gray-50">
                       <div className="flex items-center justify-between flex-wrap gap-3">
                         <div className="flex items-center gap-2 text-sm font-semibold text-gray-800">
@@ -1347,7 +1461,7 @@ function GestionIncidenciasPage() {
                         </div>
                       </div>
                     </div>
-
+*/}
                     {/* Botón para ver apelaciones relacionadas */}
                     {incidence.appeals && incidence.appeals.length > 0 && (
                       <div className="mb-5 border-2 border-purple-300 rounded-xl p-4 bg-gradient-to-r from-purple-50 to-pink-50">
@@ -1500,7 +1614,7 @@ function GestionIncidenciasPage() {
   };
 
   const renderAppeals = () => {
-    if (!appeals.length) {
+    if (!filteredAppeals.length) {
       return (
         <EmptyState
           icon={FiUsers}
@@ -1511,7 +1625,7 @@ function GestionIncidenciasPage() {
     }
     return (
       <div className="space-y-4">
-        {appeals.map((appeal) => {
+        {filteredAppeals.map((appeal) => {
           // Buscar la incidencia relacionada
           const relatedIncidence = incidences.find(inc => inc.id === appeal.incidenceId);
           const productTitle = relatedIncidence?.productTitle || `Producto #${relatedIncidence?.productId || 'desconocido'}`;
@@ -1784,6 +1898,7 @@ function GestionIncidenciasPage() {
                   className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-xl"
                 />
               </div>
+              {/*
               <div className="relative">
                 <FiChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
                 <select
@@ -1797,6 +1912,7 @@ function GestionIncidenciasPage() {
                   <option value="baja">Baja</option>
                 </select>
               </div>
+              */}
             </div>
           </div>
         </div>
