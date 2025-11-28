@@ -726,6 +726,10 @@ export const appealAPI = {
     const response = await api.post('/appeals', payload);
     return response.data;
   },
+  update: async (id, payload) => {
+    const response = await api.put(`/appeals/${id}`, payload);
+    return response.data;
+  },
   remove: async (id) => {
     const response = await api.delete(`/appeals/${id}`);
     return response.data;

@@ -388,6 +388,7 @@ function GestionIncidenciasPage() {
   const [actionLoading, setActionLoading] = useState(false);
   const [expandedIncidenceReports, setExpandedIncidenceReports] = useState({});
   const [reportGroupAssignments, setReportGroupAssignments] = useState({});
+  const [appealAssignments, setAppealAssignments] = useState({});
 
   useEffect(() => {
     const access = checkAdminAccess("gestionar_incidencias");
@@ -1011,11 +1012,19 @@ function GestionIncidenciasPage() {
 
   const handleResolveIncidence = (incidence, decision) => {
     if (!canResolve) return;
-    if (incidence.hasPendingAppeal && userRole !== ROLES.ADMIN) {
+    // Permitir que el moderador asignado también decida aunque haya apelación pendiente.
+    // Bloquear solo si hay moderador asignado distinto
+    const assignedModeratorId = parseNumericId(incidence.moderadorId);
+    const currentId = parseNumericId(currentUser?.id);
+    if (
+      incidence.hasPendingAppeal &&
+      userRole === ROLES.MODERADOR &&
+      assignedModeratorId && assignedModeratorId !== currentId
+    ) {
       showFeedback(
         "warning",
         "Apelación pendiente",
-        "Solo un administrador puede decidir mientras exista una apelación abierta."
+        "Solo el moderador asignado o un administrador puede decidir mientras exista una apelación abierta."
       );
       return;
     }
@@ -1082,6 +1091,42 @@ function GestionIncidenciasPage() {
     } catch (error) {
       console.error("Error al resolver incidencia:", error);
       showFeedback("error", "No se pudo actualizar", "Intenta nuevamente.");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleAssignModeratorToAppeal = async (appeal) => {
+    try {
+      const selectedId = parseNumericId(appealAssignments[appeal.id]);
+      if (!selectedId) {
+        showFeedback('warning', 'Selecciona moderador', 'Elige un moderador para esta apelación.');
+        return;
+      }
+      setActionLoading(true);
+      // Incidencia relacionada para excluir moderador ya asignado
+      const relatedIncidence = incidences.find(inc => inc.id === appeal.incidenceId);
+      if (relatedIncidence && relatedIncidence.moderadorId && relatedIncidence.moderadorId === selectedId) {
+        showFeedback('warning', 'Ya asignado', 'Ese moderador ya está vinculado a la incidencia.');
+        setActionLoading(false);
+        return;
+      }
+      // Actualizar la incidencia asignando moderador (userId)
+      await incidenceAPI.update(appeal.incidenceId, { userId: selectedId });
+      // Intentar actualizar la apelación si el backend soporta assignedModeratorId
+      try {
+        if (appealAPI.update) {
+          await appealAPI.update(appeal.id, { assignedModeratorId: selectedId });
+        }
+      } catch (e) {
+        // Silenciar fallo opcional
+      }
+      showFeedback('success', 'Asignado', 'Moderador asignado para revisar la apelación.');
+      setAppealAssignments(prev => ({ ...prev, [appeal.id]: '' }));
+      await refreshData();
+    } catch (e) {
+      console.error('Error asignando moderador a apelación:', e);
+      showFeedback('error', 'No se pudo asignar', 'Intenta nuevamente.');
     } finally {
       setActionLoading(false);
     }
@@ -1630,6 +1675,8 @@ function GestionIncidenciasPage() {
           const relatedIncidence = incidences.find(inc => inc.id === appeal.incidenceId);
           const productTitle = relatedIncidence?.productTitle || `Producto #${relatedIncidence?.productId || 'desconocido'}`;
           const productPhoto = relatedIncidence?.productPhoto;
+          const alreadyModeratorId = relatedIncidence?.moderadorId;
+          const availableModerators = moderatorUsers.filter(m => parseNumericId(m.id) !== parseNumericId(alreadyModeratorId));
           
           return (
             <div
@@ -1739,6 +1786,31 @@ function GestionIncidenciasPage() {
                       <FiExternalLink className="text-lg" />
                       Ver incidencia relacionada
                     </button>
+                    {availableModerators.length > 0 && (
+                      <div className="flex-1 flex flex-col sm:flex-row gap-2">
+                        <select
+                          className="flex-1 px-3 py-2 border border-gray-300 rounded-xl text-sm"
+                          value={appealAssignments[appeal.id] || ''}
+                          onChange={(e) =>
+                            setAppealAssignments(prev => ({ ...prev, [appeal.id]: e.target.value }))
+                          }
+                        >
+                          <option value="">Seleccionar moderador</option>
+                          {availableModerators.map(u => (
+                            <option key={u.id} value={u.id}>
+                              {`${u.name || ''} ${u.lastname || ''}`.trim() || u.email || `Usuario ${u.id}`}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          disabled={actionLoading || !appealAssignments[appeal.id]}
+                          onClick={() => handleAssignModeratorToAppeal(appeal)}
+                          className="px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white font-semibold rounded-xl disabled:opacity-50 text-sm"
+                        >
+                          Asignar moderador
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
