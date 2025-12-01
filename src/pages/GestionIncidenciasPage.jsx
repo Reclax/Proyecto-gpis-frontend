@@ -1096,6 +1096,56 @@ function GestionIncidenciasPage() {
     }
   };
 
+  // Decisiones sobre apelaciones: levantar suspensión o suspender definitivamente
+  const executeAppealDecision = async (appeal, action) => {
+    try {
+      setActionLoading(true);
+
+      // Encontrar incidencia relacionada
+      const relatedIncidence = incidences.find((inc) => inc.id === appeal.incidenceId);
+
+      // Actualizar estado del producto según acción
+      if (relatedIncidence?.productId) {
+        let moderationStatus = relatedIncidence.productModerationStatus;
+        if (action === "lift") {
+          moderationStatus = "active"; // Quitar suspensión
+        } else if (action === "definitive") {
+          moderationStatus = "block"; // Suspensión definitiva
+        }
+        try {
+          await productAPI.updateModerationStatus(relatedIncidence.productId, moderationStatus);
+        } catch (e) {
+          console.warn("No se pudo actualizar moderationStatus del producto:", e);
+        }
+      }
+
+      // Cerrar apelación
+      try {
+        await appealAPI.update(appeal.id, {
+          estado: "resuelta",
+          decision: action,
+          resolvedAt: new Date().toISOString(),
+        });
+      } catch (e) {
+        console.warn("No se pudo actualizar la apelación:", e);
+      }
+
+      await refreshData();
+      showFeedback(
+        "success",
+        action === "lift" ? "Suspensión levantada" : "Suspensión definitiva",
+        action === "lift"
+          ? "El producto vuelve a estar activo y la apelación se cierra."
+          : "El producto queda bloqueado y la apelación se cierra."
+      );
+    } catch (error) {
+      console.error("Error al ejecutar decisión de apelación:", error);
+      showFeedback("error", "No se pudo actualizar", "Intenta nuevamente.");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   const handleAssignModeratorToAppeal = async (appeal) => {
     try {
       const selectedId = parseNumericId(appealAssignments[appeal.id]);
@@ -1581,7 +1631,7 @@ function GestionIncidenciasPage() {
                       <button
                         disabled={actionLoading}
                         onClick={() =>
-                          handleResolveIncidence(incidence, "aprobar")
+                          handleResolveIncidence(incidence, "rechazar")
                         }
                         className="flex-1 px-4 py-3 bg-green-600 text-white font-semibold rounded-xl hover:bg-green-700 transition disabled:opacity-50 flex items-center justify-center gap-2 text-sm"
                       >
@@ -1590,20 +1640,11 @@ function GestionIncidenciasPage() {
                       <button
                         disabled={actionLoading}
                         onClick={() =>
-                          handleResolveIncidence(incidence, "rechazar")
+                          handleResolveIncidence(incidence, "aprobar")
                         }
                         className="flex-1 px-4 py-3 bg-red-600 text-white font-semibold rounded-xl hover:bg-red-700 transition disabled:opacity-50 flex items-center justify-center gap-2 text-sm"
                       >
                         <MdBlock /> Rechazar
-                      </button>
-                      <button
-                        disabled={actionLoading}
-                        onClick={() =>
-                          handleResolveIncidence(incidence, "suspender")
-                        }
-                        className="flex-1 px-4 py-3 bg-purple-600 text-white font-semibold rounded-xl hover:bg-purple-700 transition disabled:opacity-50 flex items-center justify-center gap-2 text-sm"
-                      >
-                        <FiAlertTriangle /> Suspender
                       </button>
                     </div>
                   </div>
@@ -1677,6 +1718,11 @@ function GestionIncidenciasPage() {
           const productPhoto = relatedIncidence?.productPhoto;
           const alreadyModeratorId = relatedIncidence?.moderadorId;
           const availableModerators = moderatorUsers.filter(m => parseNumericId(m.id) !== parseNumericId(alreadyModeratorId));
+
+          const assignedModeratorId = parseNumericId(appeal.assignedModeratorId) || parseNumericId(relatedIncidence?.moderadorId);
+          const currentId = parseNumericId(currentUser?.id);
+          const canDecideAppeal =
+            userRole === ROLES.ADMIN || (userRole === ROLES.MODERADOR && (!assignedModeratorId || assignedModeratorId === currentId));
           
           return (
             <div
@@ -1808,6 +1854,25 @@ function GestionIncidenciasPage() {
                           className="px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white font-semibold rounded-xl disabled:opacity-50 text-sm"
                         >
                           Asignar moderador
+                        </button>
+                      </div>
+                    )}
+                    {/* Acciones de apelación */}
+                    {appeal.estado === 'pendiente' && canDecideAppeal && (
+                      <div className="flex gap-2 ml-auto">
+                        <button
+                          disabled={actionLoading}
+                          onClick={() => executeAppealDecision(appeal, 'lift')}
+                          className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-xl disabled:opacity-50 text-sm"
+                        >
+                          Quitar suspensión
+                        </button>
+                        <button
+                          disabled={actionLoading}
+                          onClick={() => executeAppealDecision(appeal, 'definitive')}
+                          className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-xl disabled:opacity-50 text-sm"
+                        >
+                          Suspender definitivamente
                         </button>
                       </div>
                     )}
