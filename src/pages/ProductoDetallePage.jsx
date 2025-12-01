@@ -6,7 +6,8 @@ import {
   FiChevronLeft, 
   FiMessageCircle, 
   FiHeart, 
-  FiShare2
+  FiShare2,
+  FiAlertTriangle
 } from 'react-icons/fi';
 import { HiSparkles } from 'react-icons/hi2';
 import { MdVerified } from 'react-icons/md';
@@ -26,8 +27,8 @@ import ReportProductModal from '../components/ReportProductModal';
 function ProductoDetallePage() {
   // Estado para modal de compartir
   const [shareModal, setShareModal] = useState(false);
-  // Estado para modal de reportar producto (no usado actualmente)
-  const [_reportModalOpen, _setReportModalOpen] = useState(false);
+  // Estado para modal de reportar producto
+  const [reportModalOpen, setReportModalOpen] = useState(false);
   // Función para copiar la URL al portapapeles y mostrar modal
   const handleShare = async () => {
     try {
@@ -47,12 +48,30 @@ function ProductoDetallePage() {
   const [contactingVendor, setContactingVendor] = useState(false);
   const [isFavorite, setIsFavorite] = useState(false);
   const [favoriteLoading, setFavoriteLoading] = useState(false);
+  
 
   useEffect(() => {
     const fetchProduct = async () => {
       try {
         setLoading(true);
         const productData = await productAPI.getProductById(id);
+        // Comprobar visibilidad según estado de moderación
+        try {
+          const moderationStatus = productData.moderationStatus || 'active';
+          const currentUser = authAPI.getUserData();
+          const userRole = currentUser ? normalizeRole(
+            (Array.isArray(currentUser.roles) && currentUser.roles[0]) || currentUser.role || null
+          ) : null;
+          const isOwner = currentUser && currentUser.id === productData.sellerId;
+          const isPrivileged = userRole === ROLES.ADMIN || userRole === ROLES.MODERADOR || isOwner;
+          if (moderationStatus !== 'active' && !isPrivileged) {
+            setError('Este producto no está disponible.');
+            setLoading(false);
+            return;
+          }
+        } catch {
+          // Ignorar errores de verificación de moderación
+        }
         
         // Obtener información de categoría usando categoryId
         let categoryInfo = 'Sin categoría';
@@ -95,7 +114,9 @@ function ProductoDetallePage() {
               memberSince: sellerData.createdAt ? 
                 `Miembro desde ${new Date(sellerData.createdAt).getFullYear()}` : 'Miembro nuevo',
               avatar: sellerData.avatarUrl ? 
-                (sellerData.avatarUrl.startsWith('http') ? sellerData.avatarUrl : `${API_BASE_URL}${sellerData.avatarUrl}`) : null
+                (sellerData.avatarUrl.startsWith('http') ? sellerData.avatarUrl : `${API_BASE_URL}${sellerData.avatarUrl}`) : null,
+              rating: typeof sellerData.rating === 'number' ? sellerData.rating : (parseFloat(sellerData.rating) || 0),
+              ratingCount: sellerData.ratingCount || 0
             };
           } catch {
             // Error obteniendo datos del vendedor
@@ -120,7 +141,8 @@ function ProductoDetallePage() {
                 photo.url.startsWith('http') ? photo.url : `${API_BASE_URL}${photo.url}`
               )
             : ['📦'], // Emoji por defecto si no hay imágenes
-          seller: sellerInfo
+          seller: sellerInfo,
+          moderationStatus: productData.moderationStatus || 'active'
         };
         
         setProduct(mappedProduct);
@@ -199,6 +221,7 @@ function ProductoDetallePage() {
       setContactingVendor(false);
     }
   };
+
 
   // Función para manejar favoritos
   const handleToggleFavorite = async () => {
@@ -546,6 +569,20 @@ function ProductoDetallePage() {
                             <FiShare2 />
                             Compartir
                           </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!authAPI.isAuthenticated()) {
+                                navigate('/login');
+                                return;
+                              }
+                              setReportModalOpen(true);
+                            }}
+                            className="flex-1 py-3 border-2 border-red-300 text-red-600 rounded-xl font-semibold hover:bg-red-50 hover:border-red-400 transition-all flex items-center justify-center gap-2"
+                          >
+                            <FiAlertTriangle />
+                            Reportar
+                          </button>
       {/* Modal de URL copiada */}
       <Modal
         isOpen={shareModal}
@@ -555,6 +592,13 @@ function ProductoDetallePage() {
         message="El enlace del producto ha sido copiado al portapapeles."
         hideCloseButton
         centered
+      />
+      {/* Modal de Reporte de Producto */}
+      <ReportProductModal
+        isOpen={reportModalOpen}
+        onClose={() => setReportModalOpen(false)}
+        productId={product.id}
+        productTitle={product.title}
       />
                         </div>
                       </>
@@ -592,9 +636,14 @@ function ProductoDetallePage() {
                         {product.seller.name}
                       </p>
                       <p className="text-sm text-gray-500">{product.seller.memberSince}</p>
+                      {typeof product.seller.rating !== 'undefined' && (
+                        <p className="text-sm text-gray-700 mt-1">
+                          ⭐ {Number(product.seller.rating).toFixed(1)} ({product.seller.ratingCount || 0})
+                        </p>
+                      )}
                     </div>
                   </div>
-
+                  
                 </div>
               </div>
 

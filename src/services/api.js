@@ -263,6 +263,11 @@ export const productAPI = {
     const response = await api.get('/products');
     return response.data;
   },
+  // Endpoint especial para moderación (solo administradores): devuelve todos los productos sin filtrar
+  getAllModeration: async () => {
+    const response = await api.get('/products/moderation');
+    return response.data;
+  },
 
   getById: async (id) => {
     const response = await api.get(`/products/${id}`);
@@ -363,6 +368,10 @@ export const productAPI = {
 
   deleteProduct: async (productId) => {
     const response = await api.delete(`/products/${productId}`);
+    return response.data;
+  },
+  updateModerationStatus: async (productId, moderationStatus) => {
+    const response = await api.put(`/products/${productId}/moderation`, { moderationStatus });
     return response.data;
   }
 };
@@ -570,6 +579,160 @@ export const favoriteAPI = {
       }
       return false;
     }
+  }
+};
+
+// ====== API de Reportes de Productos ======
+export const reportAPI = {
+  // Crear un nuevo reporte de producto
+  create: async (payload) => {
+    // Espera: { productId, userId, type, description, dateReport }
+    const response = await api.post('/reports', payload);
+    return response.data;
+  },
+  // Obtener todos los reportes (pendientes / historial)
+  getAll: async () => {
+    const response = await api.get('/reports');
+    // Handle both direct array response and nested {data: [...]} response
+    if (Array.isArray(response.data)) {
+      return response.data;
+    }
+    if (response.data && Array.isArray(response.data.data)) {
+      return response.data.data;
+    }
+    if (response.data && Array.isArray(response.data.reports)) {
+      return response.data.reports;
+    }
+    // If response.data is an object but not array, return empty array
+    return [];
+  },
+  // Obtener un reporte por ID
+  getById: async (reportId) => {
+    const response = await api.get(`/reports/${reportId}`);
+    return response.data;
+  },
+  // Eliminar / descartar un reporte
+  remove: async (reportId) => {
+    const response = await api.delete(`/reports/${reportId}`);
+    return response.data;
+  }
+};
+
+// ====== API de Calificaciones (Rating) ======
+export const ratingAPI = {
+  // Enviar calificación simple al vendedor
+  rateSeller: async (sellerId, score, comment = null) => {
+    const numericSellerId = parseInt(sellerId);
+    if (Number.isNaN(numericSellerId)) {
+      throw new Error(`SellerId inválido: ${sellerId}`);
+    }
+    const payload = { score: parseInt(score), comment };
+    const response = await api.post(`/ratings/${numericSellerId}`, payload);
+    return response.data;
+  },
+  // Enviar calificación desde el flujo de chat (incluye conversationId)
+  submitRatingFromChat: async (conversationId, sellerId, score, comment = null) => {
+    const numericSellerId = parseInt(sellerId);
+    const numericConversationId = parseInt(conversationId);
+    if (Number.isNaN(numericSellerId) || Number.isNaN(numericConversationId)) {
+      throw new Error('IDs inválidos para calificación');
+    }
+    const payload = { conversationId: numericConversationId, score: parseInt(score), comment };
+    const response = await api.post(`/ratings/${numericSellerId}`, payload);
+    return response.data;
+  },
+  // (Opcional) Obtener resumen de calificaciones de un vendedor
+  getSellerRatings: async (sellerId) => {
+    const numericSellerId = parseInt(sellerId);
+    if (Number.isNaN(numericSellerId)) {
+      throw new Error(`SellerId inválido: ${sellerId}`);
+    }
+    const response = await api.get(`/ratings/${numericSellerId}`);
+    return response.data;
+  }
+};
+
+// ====== API de Incidencias (mínima para dashboard) ======
+export const incidenceAPI = {
+  create: async (payload) => {
+    const response = await api.post('/incidences', payload);
+    return response.data;
+  },
+  getAll: async () => {
+    try {
+      // Try /incidences first, then /incidence if that fails
+      let response;
+      try {
+        response = await api.get('/incidences');
+      } catch {
+        console.warn("GET /incidences failed, trying /incidence");
+        response = await api.get('/incidence');
+      }
+      // Handle both direct array response and nested {data: [...]} response
+      if (Array.isArray(response.data)) {
+        return response.data;
+      }
+      if (response.data && Array.isArray(response.data.data)) {
+        return response.data.data;
+      }
+      if (response.data && Array.isArray(response.data.incidences)) {
+        return response.data.incidences;
+      }
+      // If response.data is an object but not array, return empty array
+      return [];
+    } catch (error) {
+      console.error("incidenceAPI.getAll error:", error);
+      throw error;
+    }
+  },
+  getById: async (id) => {
+    const response = await api.get(`/incidences/${id}`);
+    return response.data;
+  },
+  update: async (id, payload) => {
+    const response = await api.put(`/incidences/${id}`, payload);
+    return response.data;
+  },
+  remove: async (id) => {
+    const response = await api.delete(`/incidences/${id}`);
+    return response.data;
+  }
+};
+
+// ====== API de Apelaciones de Incidencias ======
+// Ajusta los endpoints si el backend usa otra ruta (p.ej. /incidence-appeals)
+export const appealAPI = {
+  getAll: async () => {
+    const response = await api.get('/appeals');
+    // Handle both direct array response and nested {data: [...]} response
+    if (Array.isArray(response.data)) {
+      return response.data;
+    }
+    if (response.data && Array.isArray(response.data.data)) {
+      return response.data.data;
+    }
+    if (response.data && Array.isArray(response.data.appeals)) {
+      return response.data.appeals;
+    }
+    // If response.data is an object but not array, return empty array
+    return [];
+  },
+  getById: async (id) => {
+    const response = await api.get(`/appeals/${id}`);
+    return response.data;
+  },
+  create: async (payload) => {
+    // Espera: { incidenceId, motivo | reason | description }
+    const response = await api.post('/appeals', payload);
+    return response.data;
+  },
+  update: async (id, payload) => {
+    const response = await api.put(`/appeals/${id}`, payload);
+    return response.data;
+  },
+  remove: async (id) => {
+    const response = await api.delete(`/appeals/${id}`);
+    return response.data;
   }
 };
 
