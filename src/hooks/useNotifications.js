@@ -181,6 +181,7 @@ export const useNotifications = () => {
     if (!window.__wsNotificationListener) {
       window.__wsNotificationListener = true;
       let lastMessageId = null;
+      
       const handleNewMessage = (payload) => {
         // Solo crear notificación si el mensaje no es del usuario actual y no es duplicado
         if (
@@ -203,9 +204,19 @@ export const useNotifications = () => {
           addNotification(notificationPayload);
         }
       };
+      
+      const handleNewNotification = (payload) => {
+        console.log('🔔 Nueva notificación recibida vía WebSocket:', payload);
+        // Agregar la notificación directamente
+        addNotification(payload);
+      };
+      
       webSocketService.on('newMessage', handleNewMessage);
+      webSocketService.on('newNotification', handleNewNotification);
+      
       window.__wsNotificationCleanup = () => {
         webSocketService.off('newMessage', handleNewMessage);
+        webSocketService.off('newNotification', handleNewNotification);
         window.__wsNotificationListener = false;
       };
     }

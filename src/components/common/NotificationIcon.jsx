@@ -51,11 +51,24 @@ const NotificationIcon = () => {
       await markAsRead(notification.id);
     }
 
+    setIsOpen(false); // Cerrar dropdown
+
     // Si es una notificación de mensaje, navegar al chat
     if (notification.conversationId || notification.originalMessage?.conversationId) {
       const conversationId = notification.conversationId || notification.originalMessage?.conversationId;
-      setIsOpen(false); // Cerrar dropdown
       navigate(`/chat/${conversationId}`);
+    }
+    // Si es una notificación de reporte con productId, navegar a gestión de incidencias
+    else if (notification.productId || notification.reportId) {
+      const productId = notification.productId;
+      // Navegar a la pestaña de reportes pendientes con scroll al producto
+      navigate('/gestion-incidencias', { 
+        state: { 
+          tab: 'reportes',
+          productId: productId,
+          scrollToProduct: true 
+        } 
+      });
     }
   };
 
@@ -157,7 +170,7 @@ const NotificationIcon = () => {
                             <div className="w-2 h-2 bg-blue-500 rounded-full flex-shrink-0"></div>
                           )}
                         </div>
-                        <p className="text-sm text-gray-600 line-clamp-2">
+                        <p className="text-sm text-gray-600 line-clamp-2" title={notification.message}>
                           {notification.message}
                         </p>
                         <div className="flex items-center justify-between mt-2">

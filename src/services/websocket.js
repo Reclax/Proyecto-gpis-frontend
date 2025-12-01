@@ -109,6 +109,7 @@ class WebSocketService {
           }
           break;
         case 'notification:new':
+        case 'newNotification':
           // Nueva notificación recibida
           this.emit('newNotification', message.data);
           break;

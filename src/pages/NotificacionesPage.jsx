@@ -52,6 +52,17 @@ function NotificacionesPage() {
       const conversationId = notification.conversationId || notification.originalMessage?.conversationId;
       navigate(`/chat/${conversationId}`);
     }
+    // Si es una notificación de reporte con productId, navegar a gestión de incidencias
+    else if (notification.productId || notification.reportId) {
+      const productId = notification.productId;
+      navigate('/gestion-incidencias', { 
+        state: { 
+          tab: 'reportes',
+          productId: productId,
+          scrollToProduct: true 
+        } 
+      });
+    }
   };
 
   return (
@@ -159,7 +170,7 @@ function NotificacionesPage() {
                           )}
                         </div>
                         
-                        <p className="text-gray-600 mb-2 line-clamp-2">
+                        <p className="text-gray-600 mb-2 whitespace-pre-wrap">
                           {notification.message}
                         </p>
                         
