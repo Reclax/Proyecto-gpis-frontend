@@ -8,9 +8,6 @@ export { API_BASE_URL };
 // Crear instancia de axios con configuración base
 const api = axios.create({
   baseURL: API_BASE_URL,
-  headers: {
-    'ngrok-skip-browser-warning': 'true',
-  },
   timeout: 30000, // 30 segundos de timeout (aumentado para manejar imágenes)
 });
 
