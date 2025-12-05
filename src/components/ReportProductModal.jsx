@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { FiX, FiAlertTriangle, FiCheck } from 'react-icons/fi';
 import Modal from './common/Modal';
+import { authAPI, reportAPI } from '../services/api';
 
 function ReportProductModal({ isOpen, onClose, productId, productTitle }) {
   const [reportData, setReportData] = useState({
@@ -58,40 +59,42 @@ function ReportProductModal({ isOpen, onClose, productId, productTitle }) {
       return;
     }
 
+    // Verificar autenticación y obtener userId del token/cookie
+    if (!authAPI.isAuthenticated()) {
+      setErrorMessage('Debes iniciar sesión para reportar.');
+      return;
+    }
+
+    const user = authAPI.getUserData();
+    const userId = user?.id ? parseInt(user.id) : null;
+    if (!userId) {
+      setErrorMessage('No se pudo obtener tu usuario. Vuelve a iniciar sesión.');
+      return;
+    }
+
     setLoading(true);
     try {
-      // Aquí iría la llamada al backend cuando esté disponible
-      // const response = await reportAPI.createReport({
-      //   product_id: productId,
-      //   tipo_reporte: reportData.tipo_reporte,
-      //   comentario: reportData.comentario
-      // });
+      const payload = {
+        type: reportData.tipo_reporte,
+        description: reportData.comentario,
+        userId,
+        productId: Number(productId),
+        dateReport: new Date().toISOString()
+      };
 
-      // Por ahora, simulamos el envío exitoso
-      console.log('Reporte enviado:', {
-        product_id: productId,
-        ...reportData,
-        fecha_reporte: new Date().toISOString()
-      });
+      await reportAPI.create(payload);
 
-      // Mostrar modal de éxito
+      // Éxito
       setSuccessModal(true);
-
-      // Limpiar formulario
-      setReportData({
-        tipo_reporte: '',
-        comentario: ''
-      });
-
-      // Cerrar modal después de 2 segundos
+      setReportData({ tipo_reporte: '', comentario: '' });
       setTimeout(() => {
         setSuccessModal(false);
         onClose();
-      }, 2000);
-
+      }, 1800);
     } catch (error) {
-      setErrorMessage('Error al enviar el reporte. Intenta de nuevo.');
-      console.error('Error:', error);
+      const msg = error?.response?.data?.message || 'Error al enviar el reporte. Intenta de nuevo.';
+      setErrorMessage(msg);
+      console.error('Error enviando reporte:', error);
     } finally {
       setLoading(false);
     }
@@ -109,7 +112,7 @@ function ReportProductModal({ isOpen, onClose, productId, productTitle }) {
     <>
       {/* Modal Principal de Reporte */}
       <div
-        className={`fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center transition-opacity duration-300 ${
+        className={`fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center transition-opacity duration-300 ${
           isOpen ? 'opacity-100' : 'opacity-0 pointer-events-none'
         }`}
         onClick={onClose}
@@ -236,7 +239,7 @@ function ReportProductModal({ isOpen, onClose, productId, productTitle }) {
 
       {/* Modal de Éxito */}
       {successModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center">
           <div className="bg-white rounded-3xl shadow-2xl p-8 max-w-md text-center animate-in fade-in zoom-in duration-300">
             <div className="flex justify-center mb-4">
               <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center">

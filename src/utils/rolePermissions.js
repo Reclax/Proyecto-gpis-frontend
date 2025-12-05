@@ -1,5 +1,5 @@
-import { authAPI } from '../services/api';
-import { PERMISOS_POR_ROL, ROLES, obtenerPermisos, normalizeRole } from '../config/roles';
+import { ROLES, normalizeRole, obtenerPermisos } from "../config/roles";
+import { authAPI } from "../services/api";
 
 /**
  * Obtiene el rol actual del usuario autenticado
@@ -8,21 +8,77 @@ export const getCurrentUserRole = () => {
   if (!authAPI.isAuthenticated()) return null;
 
   const user = authAPI.getUserData();
-  if (user?.roles && Array.isArray(user.roles)) {
-    return user.roles[0];
+
+  const resolveRole = (value) => {
+    const normalized = normalizeRole(value);
+    return normalized || null;
+  };
+
+  const pickFromCollection = (collection) => {
+    if (!Array.isArray(collection) || collection.length === 0) return null;
+
+    for (const entry of collection) {
+      const resolved = resolveRole(entry);
+      if (resolved) return resolved;
+
+      if (entry?.role) {
+        const nested = resolveRole(entry.role);
+        if (nested) return nested;
+      }
+
+      if (entry?.Role) {
+        const nested = resolveRole(entry.Role);
+        if (nested) return nested;
+      }
+    }
+
+    return null;
+  };
+
+  const roleFromRoles = pickFromCollection(user?.roles);
+  if (roleFromRoles) return roleFromRoles;
+
+  const roleFromUpperRoles = pickFromCollection(user?.Roles);
+  if (roleFromUpperRoles) return roleFromUpperRoles;
+
+  const roleFromUserRoles = pickFromCollection(
+    user?.user_roles || user?.UserRoles
+  );
+  if (roleFromUserRoles) return roleFromUserRoles;
+
+  const roleFromAuthorities = pickFromCollection(
+    user?.authorities || user?.Authorities
+  );
+  if (roleFromAuthorities) return roleFromAuthorities;
+
+  if (user?.role) {
+    return resolveRole(user.role);
+  }
+
+  if (user?.Role) {
+    return resolveRole(user.Role);
+  }
+
+  if (user?.roleId || user?.role_id) {
+    return resolveRole(user.roleId || user.role_id);
   }
 
   try {
     const token = document.cookie.match(/authToken=([^;]+)/)?.[1];
     if (token) {
-      const payload = JSON.parse(atob(token.split('.')[1]));
-  return payload.roles?.[0];
+      const payload = JSON.parse(atob(token.split(".")[1]));
+      if (payload.roles?.length) {
+        return resolveRole(payload.roles[0]);
+      }
+      if (payload.authorities?.length) {
+        return resolveRole(payload.authorities[0]);
+      }
     }
   } catch {
     // Error decoding token
   }
 
-  return user?.role || null;
+  return null;
 };
 
 /**
@@ -74,14 +130,35 @@ export const isRegularUser = () => {
  */
 export const getAvailableAdminPages = () => {
   const allPages = [
-    { label: 'Dashboard', path: '/admin', icon: 'FiBarChart2', available: true },
-    { label: 'Gestionar Usuarios', path: '/admin/usuarios', permission: 'gestionar_usuarios' },
-    { label: 'Gestionar Incidencias', path: '/admin/incidencias', permission: 'gestionar_incidencias' },
-    { label: 'Gestionar Productos', path: '/admin/productos', permission: 'gestionar_productos_admin' },
-    { label: 'Registrar Moderadores', path: '/admin/moderadores', permission: 'registrar_moderadores' }
+    {
+      label: "Dashboard",
+      path: "/admin",
+      icon: "FiBarChart2",
+      available: true,
+    },
+    {
+      label: "Gestionar Usuarios",
+      path: "/admin/usuarios",
+      permission: "gestionar_usuarios",
+    },
+    {
+      label: "Gestionar Incidencias",
+      path: "/admin/incidencias",
+      permission: "gestionar_incidencias",
+    },
+    {
+      label: "Gestionar Productos",
+      path: "/admin/productos",
+      permission: "gestionar_productos_admin",
+    },
+    {
+      label: "Registrar Moderadores",
+      path: "/admin/moderadores",
+      permission: "registrar_moderadores",
+    },
   ];
 
-  return allPages.filter(page => {
+  return allPages.filter((page) => {
     if (page.available === true) return true;
     return hasPermission(page.permission);
   });
@@ -98,7 +175,7 @@ export const checkAdminAccess = (requiredPermission = null) => {
     return {
       isAllowed: false,
       userRole: null,
-      redirectPath: '/login'
+      redirectPath: "/login",
     };
   }
 
@@ -106,7 +183,7 @@ export const checkAdminAccess = (requiredPermission = null) => {
     return {
       isAllowed: false,
       userRole: role,
-      redirectPath: '/'
+      redirectPath: "/",
     };
   }
 
@@ -114,14 +191,13 @@ export const checkAdminAccess = (requiredPermission = null) => {
     return {
       isAllowed: false,
       userRole: role,
-      redirectPath: '/admin'
+      redirectPath: "/admin",
     };
   }
 
   return {
     isAllowed: true,
     userRole: role,
-    redirectPath: null
+    redirectPath: null,
   };
 };
-

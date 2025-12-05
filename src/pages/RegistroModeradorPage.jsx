@@ -1,34 +1,49 @@
-import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { FiUser, FiMail, FiPhone, FiMapPin, FiLock, FiShield, FiCheck } from 'react-icons/fi';
-import usePageTitle from '../hooks/usePageTitle';
-import Modal from '../components/common/Modal';
-import { authAPI } from '../services/api';
-import { checkAdminAccess } from '../utils/rolePermissions';
+import { useEffect, useState } from "react";
+import {
+  FiCheck,
+  FiLock,
+  FiMail,
+  FiPhone,
+  FiShield,
+  FiUser,
+} from "react-icons/fi";
+import { useNavigate } from "react-router-dom";
+import Modal from "../components/common/Modal";
+import usePageTitle from "../hooks/usePageTitle";
+import { authAPI } from "../services/api";
+import { checkAdminAccess } from "../utils/rolePermissions";
 
 function RegistroModeradorPage() {
-  usePageTitle('Registrar Moderador');
+  usePageTitle("Registrar Moderador");
   const navigate = useNavigate();
   const [isAuthorized, setIsAuthorized] = useState(false);
   const [loading, setLoading] = useState(true);
   const [formData, setFormData] = useState({
-    cedula: '',
-    nombre: '',
-    apellido: '',
-    email: '',
-    telefono: '',
-    password: '',
-    confirmPassword: ''
+    cedula: "",
+    nombre: "",
+    apellido: "",
+    email: "",
+    telefono: "",
+    password: "",
+    confirmPassword: "",
+    avatarUrl: null,
   });
+  const [avatarPreview, setAvatarPreview] = useState(null);
   const [formLoading, setFormLoading] = useState(false);
-  const [modalData, setModalData] = useState({ isOpen: false, type: 'info', title: '', message: '', onConfirm: null });
+  const [modalData, setModalData] = useState({
+    isOpen: false,
+    type: "info",
+    title: "",
+    message: "",
+    onConfirm: null,
+  });
 
   useEffect(() => {
     // Verificar que solo Admin pueda registrar moderadores
-    const access = checkAdminAccess('registrar_moderadores');
+    const access = checkAdminAccess("registrar_moderadores");
 
     if (!access.isAllowed) {
-      navigate(access.redirectPath || '/');
+      navigate(access.redirectPath || "/");
       return;
     }
 
@@ -38,7 +53,41 @@ function RegistroModeradorPage() {
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
+    setFormData((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const handleFileChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      if (file.size > 2 * 1024 * 1024) {
+        setModalData({
+          isOpen: true,
+          type: "error",
+          title: "Error de Archivo",
+          message:
+            "La imagen es demasiado grande. Por favor, selecciona una imagen menor a 2MB.",
+          confirmText: "Entendido",
+        });
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        setAvatarPreview(e.target.result);
+      };
+      reader.readAsDataURL(file);
+
+      setFormData((prev) => ({
+        ...prev,
+        avatarUrl: file,
+      }));
+    } else {
+      setAvatarPreview(null);
+      setFormData((prev) => ({
+        ...prev,
+        avatarUrl: null,
+      }));
+    }
   };
 
   const validateForm = () => {
@@ -46,10 +95,10 @@ function RegistroModeradorPage() {
     if (!/^\d{10}$/.test(formData.cedula)) {
       setModalData({
         isOpen: true,
-        type: 'error',
-        title: 'Error de Validación',
-        message: 'La cédula debe tener 10 dígitos',
-        confirmText: 'Entendido'
+        type: "error",
+        title: "Error de Validación",
+        message: "La cédula debe tener 10 dígitos",
+        confirmText: "Entendido",
       });
       return false;
     }
@@ -58,10 +107,10 @@ function RegistroModeradorPage() {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
       setModalData({
         isOpen: true,
-        type: 'error',
-        title: 'Error de Validación',
-        message: 'Por favor ingresa un email válido',
-        confirmText: 'Entendido'
+        type: "error",
+        title: "Error de Validación",
+        message: "Por favor ingresa un email válido",
+        confirmText: "Entendido",
       });
       return false;
     }
@@ -70,10 +119,10 @@ function RegistroModeradorPage() {
     if (formData.password.length < 8) {
       setModalData({
         isOpen: true,
-        type: 'error',
-        title: 'Contraseña Débil',
-        message: 'La contraseña debe tener al menos 8 caracteres',
-        confirmText: 'Entendido'
+        type: "error",
+        title: "Contraseña Débil",
+        message: "La contraseña debe tener al menos 8 caracteres",
+        confirmText: "Entendido",
       });
       return false;
     }
@@ -82,22 +131,27 @@ function RegistroModeradorPage() {
     if (formData.password !== formData.confirmPassword) {
       setModalData({
         isOpen: true,
-        type: 'error',
-        title: 'Error de Validación',
-        message: 'Las contraseñas no coinciden',
-        confirmText: 'Entendido'
+        type: "error",
+        title: "Error de Validación",
+        message: "Las contraseñas no coinciden",
+        confirmText: "Entendido",
       });
       return false;
     }
 
     // Validar campos requeridos según backend: nombre, apellido, telefono, email
-    if (!formData.nombre || !formData.apellido || !formData.telefono || !formData.email) {
+    if (
+      !formData.nombre ||
+      !formData.apellido ||
+      !formData.telefono ||
+      !formData.email
+    ) {
       setModalData({
         isOpen: true,
-        type: 'error',
-        title: 'Campos Requeridos',
-        message: 'Por favor completa todos los campos obligatorios',
-        confirmText: 'Entendido'
+        type: "error",
+        title: "Campos Requeridos",
+        message: "Por favor completa todos los campos obligatorios",
+        confirmText: "Entendido",
       });
       return false;
     }
@@ -112,76 +166,93 @@ function RegistroModeradorPage() {
 
     setModalData({
       isOpen: true,
-      type: 'confirm',
-      title: 'Confirmar Registro',
+      type: "confirm",
+      title: "Confirmar Registro",
       message: `¿Estás seguro de registrar a ${formData.nombre} ${formData.apellido} como Moderador?`,
       onConfirm: async () => {
         setFormLoading(true);
         try {
           // Construir FormData en el mismo formato que RegisterPage
           const registerFormData = new FormData();
-          registerFormData.append('dni', formData.cedula.toString());
-          registerFormData.append('email', formData.email);
-          registerFormData.append('name', formData.nombre);
-          registerFormData.append('lastname', formData.apellido);
-          registerFormData.append('password', formData.password);
-          if (formData.telefono) registerFormData.append('phone', formData.telefono.toString());
+          registerFormData.append("dni", formData.cedula.toString());
+          registerFormData.append("email", formData.email);
+          registerFormData.append("name", formData.nombre);
+          registerFormData.append("lastname", formData.apellido);
+          registerFormData.append("password", formData.password);
+          if (formData.telefono)
+            registerFormData.append("phone", formData.telefono.toString());
 
           // roleId: 3 -> Moderador según tu backend
-          registerFormData.append('roleId', '3');
+          registerFormData.append("roleId", "3");
 
-          // Si en el futuro se agrega avatar, se puede append('avatar', file)
+          // Si hay archivo de imagen, agregarlo
+          if (formData.avatarUrl && formData.avatarUrl instanceof File) {
+            registerFormData.append("avatar", formData.avatarUrl);
+          }
 
           // Llamar al endpoint público de registro (backend enviará verificación por email)
           await authAPI.register(registerFormData);
 
           setModalData({
             isOpen: true,
-            type: 'success',
-            title: 'Moderador Registrado',
+            type: "success",
+            title: "Moderador Registrado",
             message: `${formData.nombre} ${formData.apellido} ha sido registrado exitosamente como Moderador. Se ha enviado un correo de verificación a ${formData.email}`,
-            onConfirm: () => navigate('/admin/usuarios'),
-            confirmText: 'Ir a Usuarios'
+            onConfirm: () => navigate("/admin/usuarios"),
+            confirmText: "Ir a Usuarios",
           });
 
           // Limpiar formulario
           setFormData({
-            cedula: '',
-            nombre: '',
-            apellido: '',
-            email: '',
-            telefono: '',
-            password: '',
-            confirmPassword: ''
+            cedula: "",
+            nombre: "",
+            apellido: "",
+            email: "",
+            telefono: "",
+            password: "",
+            confirmPassword: "",
           });
         } catch (error) {
           // Manejo de errores similar a RegisterPage
-          let message = 'Hubo un error al registrar el moderador. Por favor intenta nuevamente.';
-          if (error.code === 'ECONNABORTED') {
-            message = 'La operación tardó demasiado tiempo. El servidor puede estar sobrecargado.';
+          let message =
+            "Hubo un error al registrar el moderador. Por favor intenta nuevamente.";
+          if (error.code === "ECONNABORTED") {
+            message =
+              "La operación tardó demasiado tiempo. El servidor puede estar sobrecargado.";
           } else if (error.response?.status === 400) {
-            message = error.response.data?.message || error.response.data?.error || 'Email, DNI ya registrado o rol no válido';
+            message =
+              error.response.data?.message ||
+              error.response.data?.error ||
+              "Email, DNI ya registrado o rol no válido";
           } else if (error.response?.status === 500) {
-            message = error.response.data?.message || error.response.data?.error || 'Error interno del servidor';
-          } else if (error.code === 'ECONNREFUSED') {
-            message = 'No se puede conectar al servidor. Verifica que el backend esté corriendo.';
+            message =
+              error.response.data?.message ||
+              error.response.data?.error ||
+              "Error interno del servidor";
+          } else if (error.code === "ECONNREFUSED") {
+            message =
+              "No se puede conectar al servidor. Verifica que el backend esté corriendo.";
           } else {
-            message = error.response?.data?.message || error.response?.data?.error || error.message || message;
+            message =
+              error.response?.data?.message ||
+              error.response?.data?.error ||
+              error.message ||
+              message;
           }
 
           setModalData({
             isOpen: true,
-            type: 'error',
-            title: 'Error al Registrar',
+            type: "error",
+            title: "Error al Registrar",
             message,
-            confirmText: 'Entendido'
+            confirmText: "Entendido",
           });
         } finally {
           setFormLoading(false);
         }
       },
-      confirmText: 'Registrar',
-      cancelText: 'Cancelar'
+      confirmText: "Registrar",
+      cancelText: "Cancelar",
     });
   };
 
@@ -206,7 +277,7 @@ function RegistroModeradorPage() {
         {/* Header */}
         <div className="mb-6">
           <button
-            onClick={() => navigate('/admin')}
+            onClick={() => navigate("/admin")}
             className="text-orange-600 hover:text-orange-700 font-semibold mb-4 flex items-center gap-2"
           >
             ← Volver al Panel
@@ -215,11 +286,50 @@ function RegistroModeradorPage() {
             <FiShield className="text-purple-600" />
             Registrar Nuevo Moderador
           </h1>
-          <p className="text-gray-600 mt-1">Completa la información para dar de alta un nuevo moderador</p>
+          <p className="text-gray-600 mt-1">
+            Completa la información para dar de alta un nuevo moderador
+          </p>
         </div>
 
         {/* Formulario */}
-        <form onSubmit={handleSubmit} className="bg-white rounded-xl shadow-sm border border-gray-200 p-8">
+        <form
+          onSubmit={handleSubmit}
+          className="bg-white rounded-xl shadow-sm border border-gray-200 p-8"
+        >
+          {/* Avatar Upload */}
+          <div className="flex flex-col items-center mb-8">
+            <div className="relative">
+              <div className="w-24 h-24 rounded-full border-4 border-purple-100 overflow-hidden bg-gray-100 flex items-center justify-center">
+                {avatarPreview ? (
+                  <img
+                    src={avatarPreview}
+                    alt="Preview"
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <FiUser className="w-10 h-10 text-gray-400" />
+                )}
+              </div>
+              <input
+                type="file"
+                id="avatar"
+                accept="image/*"
+                onChange={handleFileChange}
+                className="hidden"
+              />
+              <label
+                htmlFor="avatar"
+                className="absolute bottom-0 right-0 bg-purple-600 text-white p-2 rounded-full cursor-pointer hover:bg-purple-700 transition-colors shadow-md"
+                title="Subir foto"
+              >
+                <span className="text-xs">📷</span>
+              </label>
+            </div>
+            <p className="text-sm text-gray-500 mt-2">
+              Foto de perfil (Opcional)
+            </p>
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* Cédula */}
             <div>
@@ -339,7 +449,9 @@ function RegistroModeradorPage() {
                   className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
                 />
               </div>
-              <p className="text-xs text-gray-500 mt-1">Mínimo 8 caracteres, incluye mayúsculas y números</p>
+              <p className="text-xs text-gray-500 mt-1">
+                Mínimo 8 caracteres, incluye mayúsculas y números
+              </p>
             </div>
 
             {/* Confirmar Contraseña (columna derecha) */}
@@ -367,7 +479,9 @@ function RegistroModeradorPage() {
             <div className="flex items-start gap-3">
               <FiShield className="text-purple-600 text-xl mt-0.5" />
               <div>
-                <h3 className="font-semibold text-purple-900">Permisos de Moderador</h3>
+                <h3 className="font-semibold text-purple-900">
+                  Permisos de Moderador
+                </h3>
                 <ul className="text-sm text-purple-800 mt-2 space-y-1">
                   <li className="flex items-center gap-2">
                     <FiCheck className="text-purple-600" />
@@ -394,7 +508,7 @@ function RegistroModeradorPage() {
           <div className="mt-8 flex gap-4 justify-end">
             <button
               type="button"
-              onClick={() => navigate('/admin')}
+              onClick={() => navigate("/admin")}
               className="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors font-semibold"
             >
               Cancelar

@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { FiSend, FiChevronLeft, FiMessageSquare, FiSearch } from 'react-icons/fi';
+import { FiSend, FiChevronLeft, FiMessageSquare, FiSearch, FiStar } from 'react-icons/fi';
 import usePageTitle from '../hooks/usePageTitle';
 import { MdVerified } from 'react-icons/md';
-import { authAPI, conversationAPI, messageAPI, userAPI, productAPI, API_BASE_URL } from '../services/api';
+import { authAPI, conversationAPI, messageAPI, userAPI, productAPI, ratingAPI, API_BASE_URL } from '../services/api';
 import { useWebSocket, useWebSocketMessages, useOnlineUsers } from '../hooks/useWebSocket';
 import MessageStatusIcon from '../components/MessageStatusIcon';
+import RatingSellerModal from '../components/RatingSellerModal';
 import { useMessageVisibility } from '../hooks/useMessageVisibility';
 
 // Función para formatear fecha relativa para mensajes
@@ -78,6 +79,11 @@ function ChatPage() {
   const [messagesLoading, setMessagesLoading] = useState(false);
   const [sendingMessage, setSendingMessage] = useState(false);
   const [currentUserId, setCurrentUserId] = useState(null);
+  const [showRatingPrompt, setShowRatingPrompt] = useState(false);
+  const [ratingMessage, setRatingMessage] = useState(null);
+  const [showRatingModal, setShowRatingModal] = useState(false);
+  const [hasRatedSeller, setHasRatedSeller] = useState(false);
+  const [isCurrentUserBuyer, setIsCurrentUserBuyer] = useState(false);
   const messagesEndRef = useRef(null);
   const typingTimeoutRef = useRef(null);
 
@@ -287,13 +293,30 @@ function ChatPage() {
   const handleSelectChat = useCallback(async (conversation) => {
     try {
       setSelectedChat(conversation);
+      setShowRatingPrompt(false);
+      setRatingMessage(null);
       setMessagesLoading(true);
       // Cargar mensajes de la conversación desde el backend
       const backendMessages = await conversationAPI.getConversationMessages(conversation.id);
       // Mapear mensajes del backend al formato UI
       const userData = authAPI.getUserData();
       const currentUserIdForMapping = userData?.id || currentUserId;
+      
+      // Detectar mensaje de rating (solo visible si eres el comprador)
+      const isBuyer = conversation.isCurrentUserBuyer;
+      setIsCurrentUserBuyer(isBuyer);
+      let ratingMsg = null;
+      let hasRated = false;
+      
       const mappedMessages = backendMessages.map(msg => {
+        // Detectar y guardar mensaje de rating
+        if (msg.isRatingMessage) {
+          ratingMsg = msg;
+          // Si tiene read = true, significa que ya se calificó
+          hasRated = msg.read;
+          return null; // No renderizar como mensaje normal
+        }
+        
         const isOwn = msg.senderId === currentUserIdForMapping;
         let status = 'sent';
         if (msg.read) {
@@ -309,8 +332,17 @@ function ChatPage() {
           status: status,
           originalData: msg
         };
-      });
+      }).filter(msg => msg !== null);
+      
       setMessagesFromAPI(mappedMessages);
+      setRatingMessage(ratingMsg);
+      setHasRatedSeller(hasRated);
+      
+      // Mostrar prompt de rating si es comprador y hay mensaje de rating sin leer
+      if (isBuyer && ratingMsg && !ratingMsg.read) {
+        setShowRatingPrompt(true);
+      }
+      
       // Resetear contador de no leídos al abrir el chat
       setConversations(prev => prev.map(c => c.id === conversation.id ? { ...c, unread: 0 } : c));
       navigate(`/chat/${conversation.id}`);
@@ -582,6 +614,56 @@ function ChatPage() {
     }
   }, [selectedChat, isConnected, startTyping, stopTyping]);
 
+  // Manejar envío de rating desde el componente
+  const handleRatingSubmit = async (ratingData) => {
+    try {
+      await ratingAPI.submitRatingFromChat(
+        ratingData.conversationId,
+        ratingData.sellerId,
+        ratingData.score,
+        ratingData.comment
+      );
+      
+      // Cerrar el prompt y marcar como completado
+      setShowRatingPrompt(false);
+      
+      // Mostrar mensaje de éxito
+      alert('¡Gracias por tu calificación!');
+      
+    } catch (error) {
+      throw new Error(`Error al guardar rating: ${error.message}`);
+    }
+  };
+
+  const handleRatingCancel = () => {
+    setShowRatingPrompt(false);
+  };
+
+  const handleOpenRatingModal = () => {
+    setShowRatingModal(true);
+  };
+
+  const handleCloseRatingModal = () => {
+    setShowRatingModal(false);
+  };
+
+  const handleRatingSubmitModal = async (ratingData) => {
+    try {
+      await ratingAPI.submitRatingFromChat(
+        ratingData.conversationId,
+        ratingData.sellerId,
+        ratingData.score,
+        ratingData.comment
+      );
+      // Marcar como ya calificado
+      setHasRatedSeller(true);
+      handleCloseRatingModal();
+    } catch (error) {
+      console.error('Error al enviar calificación:', error);
+      throw error;
+    }
+  };
+
   // Cargar conversaciones al montar el componente
   useEffect(() => {
     if (!authAPI.isAuthenticated()) {
@@ -773,6 +855,20 @@ function ChatPage() {
                       >
                         Ver
                       </button>
+                      {isCurrentUserBuyer && (
+                        <button
+                          onClick={handleOpenRatingModal}
+                          disabled={hasRatedSeller}
+                          className={`px-4 py-2 text-white rounded-lg transition-colors text-sm font-semibold flex items-center gap-2 ${
+                            hasRatedSeller
+                              ? 'bg-gray-400 cursor-not-allowed opacity-60'
+                              : 'bg-emerald-600 hover:bg-emerald-700'
+                          }`}
+                        >
+                          <FiStar size={16} />
+                          {hasRatedSeller ? 'Gracias por calificar' : 'Calificar Vendedor'}
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -884,6 +980,8 @@ function ChatPage() {
                       </div>
                     </div>
                   )}
+
+                  {/* Componente de Rating eliminado - ahora es un modal */}
                   
                   <div ref={messagesEndRef} />
                 </div>
@@ -928,6 +1026,19 @@ function ChatPage() {
           </div>
         </div>
       </div>
+
+      {/* Modal de Calificación de Vendedor */}
+      {selectedChat && (
+        <RatingSellerModal
+          isOpen={showRatingModal}
+          onClose={handleCloseRatingModal}
+          sellerId={selectedChat.otherUserId}
+          sellerName={selectedChat.vendorName}
+          conversationId={selectedChat.id}
+          onSubmit={handleRatingSubmitModal}
+          hasRated={hasRatedSeller}
+        />
+      )}
     </div>
   );
 }
